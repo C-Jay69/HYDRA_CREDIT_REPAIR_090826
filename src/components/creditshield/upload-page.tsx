@@ -934,18 +934,20 @@ function Step2Review({
               </p>
               <p className="mt-1 text-xs text-muted-foreground max-w-sm">
                 {uploadedFile
-                  ? 'Your PDF was received, but items must be entered manually for analysis. Go back to add items from your credit report.'
+                  ? 'Your PDF was received. Analysis will parse the PDF automatically. You can also add items manually below if needed.'
                   : 'Go back and add the accounts from your credit report manually.'}
               </p>
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-3"
-                onClick={onBack}
-              >
-                <Plus className="mr-1.5 size-3.5" />
-                Add Items
-              </Button>
+              {!uploadedFile && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={onBack}
+                >
+                  <Plus className="mr-1.5 size-3.5" />
+                  Add Items
+                </Button>
+              )}
             </div>
           )}
         </CardContent>
@@ -970,7 +972,7 @@ function Step2Review({
           <ChevronLeft className="mr-2 size-4" />
           Back
         </Button>
-        <Button onClick={onAnalyze} disabled={items.length === 0 || analyzing}>
+        <Button onClick={onAnalyze} disabled={(items.length === 0 && !uploadedFile) || analyzing}>
           {analyzing ? (
             <>
               <Loader2 className="mr-2 size-4 animate-spin" />
