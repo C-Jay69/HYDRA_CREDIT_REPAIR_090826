@@ -1,0 +1,138 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  name           String?
+  phone          String?
+  address        String?
+  city           String?
+  state          String?
+  zipCode        String?
+  country        String   @default("US")
+  jurisdiction   String?  // auto-detected state/province
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  creditReports  CreditReport[]
+  disputes       Dispute[]
+  documents      Document[]
+}
+
+model CreditReport {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportSource    String   // "experian", "equifax", "transunion", "annualcreditreport"
+  reportDate      DateTime?
+  rawText         String?  // extracted text from OCR
+  fileName        String?
+  status          String   @default("uploaded") // uploaded, analyzed, processing
+  analysisResult  String?  // JSON string of analysis results
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  reportItems     ReportItem[]
+}
+
+model ReportItem {
+  id              String      @id @default(cuid())
+  creditReportId  String
+  creditReport    CreditReport @relation(fields: [creditReportId], references: [id], onDelete: Cascade)
+  accountName     String
+  accountNumber   String?
+  creditorName    String?
+  balance         Float?
+  originalAmount  Float?
+  dateOpened      DateTime?
+  dateClosed      DateTime?
+  dateDelinquent  DateTime?
+  status          String      // "paid", "charged-off", "in-collections", "late", "open", "closed"
+  accountType     String?     // "credit-card", "medical", "auto", "mortgage", "student-loan", "other"
+  isAuthorizedUser Boolean    @default(false)
+  isMedical       Boolean     @default(false)
+  isDuplicate     Boolean     @default(false)
+  duplicateOfId   String?
+  category        String?     // "negative", "positive", "neutral"
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  disputes        Dispute[]
+}
+
+model Dispute {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reportItemId    String?
+  reportItem      ReportItem? @relation(fields: [reportItemId], references: [id], onDelete: SetNull)
+  disputeType     String   // "611-bureau", "623-furnisher", "609-disclosure", "fdcpa-validation", "cease-desist", "goodwill", "pay-for-delete", "identity-theft", "medical-debt"
+  strategy        String?  // "609-method", "double-dispute", "duplicate-removal", "sol-combo", "medical-exemption"
+  targetName      String?  // bureau, creditor, or collector name
+  targetAddress   String?
+  legalBasis      String?  // e.g. "FCRA § 611(a)(1)"
+  reason          String?
+  confidence      Int?     // 0-100
+  status          String   @default("draft") // draft, pending-review, approved, sent, in-progress, resolved, denied, escalated
+  sentDate        DateTime?
+  responseDate    DateTime?
+  deadline        DateTime?
+  outcome         String?  // "removed", "corrected", "verified", "denied"
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  letters         Letter[]
+  deadlines       Deadline[]
+}
+
+model Letter {
+  id              String   @id @default(cuid())
+  disputeId       String
+  dispute         Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  templateType    String   // "fcra-609", "fcra-611", "fcra-623", "fdcpa-809", "cease-desist", "goodwill", "pay-for-delete", "identity-theft", "medical-debt", "escalation"
+  recipientName   String?
+  recipientAddr   String?
+  content         String   // letter body text
+  status          String   @default("generated") // generated, reviewed, approved, sent
+  sentVia         String?  // "certified-mail", "email", "online-portal"
+  trackingNumber  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Deadline {
+  id              String   @id @default(cuid())
+  disputeId       String
+  dispute         Dispute  @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  deadlineType    String   // "30-day-investigation", "45-day-furnisher", "5-day-validation", "sol-expiration", "annual-report"
+  title           String
+  dueDate         DateTime
+  isCompleted     Boolean  @default(false)
+  completedDate   DateTime?
+  reminderSent    Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Document {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName        String
+  fileType        String   // "pdf", "image", "text"
+  category        String   // "credit-report", "dispute-letter", "collection-notice", "police-report", "ftc-report", "payment-proof", "other"
+  description     String?
+  relatedDisputeId String?
+  fileSize        Int?
+  filePath        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

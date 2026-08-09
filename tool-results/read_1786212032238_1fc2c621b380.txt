@@ -1,0 +1,866 @@
+   290→                )}
+   291→              >
+   292→                {formatStatus(dispute.status)}
+   293→              </Badge>
+   294→            </div>
+   295→
+   296→            {/* Confidence bar */}
+   297→            {conf > 0 && (
+   298→              <div className="mt-3 flex items-center gap-2">
+   299→                <Progress
+   300→                  value={conf}
+   301→                  className={cn('h-2 w-24', confidenceBarColor(conf))}
+   302→                />
+   303→                <span className="text-xs text-muted-foreground">{conf}%</span>
+   304→              </div>
+   305→            )}
+   306→
+   307→            {/* Legal basis */}
+   308→            {dispute.legalBasis && (
+   309→              <p className="mt-2 truncate text-xs text-muted-foreground italic">
+   310→                <Scale className="mr-1 inline-block size-3" />
+   311→                {dispute.legalBasis}
+   312→              </p>
+   313→            )}
+   314→          </div>
+   315→
+   316→          {/* View button */}
+   317→          <Button variant="outline" size="sm" onClick={onView} className="shrink-0">
+   318→            <Eye className="mr-1.5 size-3.5" />
+   319→            View
+   320→          </Button>
+   321→        </div>
+   322→      </CardContent>
+   323→    </Card>
+   324→  );
+   325→}
+   326→
+   327→// ---------------------------------------------------------------------------
+   328→// Dispute Detail Dialog
+   329→// ---------------------------------------------------------------------------
+   330→
+   331→function DisputeDetailDialog({
+   332→  dispute,
+   333→  open,
+   334→  onOpenChange,
+   335→}: {
+   336→  dispute: Dispute | null;
+   337→  open: boolean;
+   338→  onOpenChange: (open: boolean) => void;
+   339→}) {
+   340→  const userId = useAppStore((s) => s.userId);
+   341→  const userName = useAppStore((s) => s.userName);
+   342→
+   343→  const [selectedTemplate, setSelectedTemplate] = useState('');
+   344→  const [letterPreview, setLetterPreview] = useState('');
+   345→  const [disclaimerChecked, setDisclaimerChecked] = useState(false);
+   346→  const [sending, setSending] = useState(false);
+   347→  const [generating, setGenerating] = useState(false);
+   348→
+   349→  // Reset state when dialog opens with a new dispute
+   350→  useEffect(() => {
+   351→    if (open && dispute) {
+   352→      setSelectedTemplate('');
+   353→      setLetterPreview('');
+   354→      setDisclaimerChecked(false);
+   355→      setSending(false);
+   356→      setGenerating(false);
+   357→    }
+   358→  }, [open, dispute]);
+   359→
+   360→  // Auto-select a recommended template based on dispute type
+   361→  const recommendedTemplate = useMemo(() => {
+   362→    if (!dispute) return '';
+   363→    const dt = dispute.disputeType.toLowerCase();
+   364→    if (dt.includes('fdcpa') || dt.includes('sold-debt') || dt.includes('collection'))
+   365→      return 'fdcpa-809';
+   366→    if (dt.includes('identity') || dt.includes('theft')) return 'identity-theft-605b';
+   367→    if (dt.includes('medical')) return 'medical-debt-cfpb-2023';
+   368→    if (dt.includes('duplicate')) return 'duplicate-reporting';
+   369→    if (dt.includes('authorized')) return 'authorized-user-removal';
+   370→    if (dt.includes('outdated') || dt.includes('double')) return 'fcra-611';
+   371→    return 'fcra-611';
+   372→  }, [dispute]);
+   373→
+   374→  const handleGenerateLetter = useCallback(() => {
+   375→    if (!dispute || !selectedTemplate) return;
+   376→
+   377→    const template = TEMPLATE_CATALOG.find((t) => t.id === selectedTemplate);
+   378→    if (!template) return;
+   379→
+   380→    setGenerating(true);
+   381→
+   382→    // Simulate async generation
+   383→    setTimeout(() => {
+   384→      try {
+   385→        const accountName = dispute.reportItem?.accountName ?? 'Unknown Account';
+   386→        const accountNumber = dispute.reportItem?.accountNumber ?? 'Unknown';
+   387→        const creditorName =
+   388→          dispute.reportItem?.creditorName ??
+   389→          dispute.targetName ??
+   390→          'Unknown Creditor';
+   391→        const balance = dispute.reportItem?.balance ?? 0;
+   392→
+   393→        // Auto-detect bureau type from target name
+   394→        let bureauInfo: { name: string; address: string } | null = null;
+   395→        const targetLower = (dispute.targetName ?? '').toLowerCase();
+   396→        if (targetLower.includes('experian'))
+   397→          bureauInfo = BUREAU_ADDRESSES.experian;
+   398→        else if (targetLower.includes('equifax'))
+   399→          bureauInfo = BUREAU_ADDRESSES.equifax;
+   400→        else if (targetLower.includes('transunion'))
+   401→          bureauInfo = BUREAU_ADDRESSES.transunion;
+   402→
+   403→        const baseParams = {
+   404→          userName: userName || 'Your Name',
+   405→          userAddress: 'Your Address',
+   406→          userCity: '',
+   407→          userState: '',
+   408→          userZip: '',
+   409→          accountNumber,
+   410→          creditorName,
+   411→          amount: balance > 0 ? `$${balance.toFixed(2)}` : 'Unknown',
+   412→          date: new Date().toISOString().split('T')[0],
+   413→          reason: dispute.reason ?? `Dispute regarding ${accountName}`,
+   414→        };
+   415→
+   416→        // Build template-specific params
+   417→        let params: Record<string, unknown> = {
+   418→          ...baseParams,
+   419→          disputedItems: [accountName],
+   420→          bureauName: bureauInfo?.name ?? 'Credit Bureau',
+   421→          bureauAddress: bureauInfo?.address ?? 'P.O. Box 0000, City, State 00000',
+   422→          collectorName: creditorName,
+   423→          collectorAddress:
+   424→            dispute.targetAddress ?? 'Unknown Address',
+   425→          companyName: creditorName,
+   426→          companyAddress:
+   427→            dispute.targetAddress ?? 'Unknown Address',
+   428→          disputeReason: dispute.reason ?? 'Inaccurate reporting',
+   429→          product: 'Credit Reporting',
+   430→          issue: `Inaccurate information regarding ${accountName}`,
+   431→          desiredResolution: 'Deletion of inaccurate information',
+   432→        };
+   433→
+   434→        const letter = template.templateFn(params);
+   435→        setLetterPreview(letter);
+   436→      } catch (err) {
+   437→        console.error('Letter generation error:', err);
+   438→        toast.error('Failed to generate letter. Check template parameters.');
+   439→      } finally {
+   440→        setGenerating(false);
+   441→      }
+   442→    }, 400);
+   443→  }, [dispute, selectedTemplate, userName]);
+   444→
+   445→  const handleApproveAndSend = useCallback(async () => {
+   446→    if (!dispute || !letterPreview || !selectedTemplate) return;
+   447→
+   448→    setSending(true);
+   449→    try {
+   450→      const template = TEMPLATE_CATALOG.find((t) => t.id === selectedTemplate);
+   451→
+   452→      // POST letter
+   453→      const letterRes = await fetch('/api/letters', {
+   454→        method: 'POST',
+   455→        headers: { 'Content-Type': 'application/json' },
+   456→        body: JSON.stringify({
+   457→          disputeId: dispute.id,
+   458→          templateType: template?.id ?? selectedTemplate,
+   459→          recipientName: dispute.targetName,
+   460→          recipientAddr: dispute.targetAddress,
+   461→          content: letterPreview,
+   462→        }),
+   463→      });
+   464→
+   465→      if (!letterRes.ok) {
+   466→        throw new Error('Failed to save letter');
+   467→      }
+   468→
+   469→      // PUT dispute status to 'sent'
+   470→ const disputeRes = await fetch('/api/disputes', {
+   471→        method: 'PUT',
+   472→        headers: { 'Content-Type': 'application/json' },
+   473→        body: JSON.stringify({ id: dispute.id, status: 'sent' }),
+   474→      });
+   475→
+   476→      if (!disputeRes.ok) {
+   477→        throw new Error('Failed to update dispute status');
+   478→      }
+   479→
+   480→      toast.success('Letter approved and dispute status updated to sent!');
+   481→      onOpenChange(false);
+   482→    } catch (err) {
+   483→      console.error('Send error:', err);
+   484→      toast.error('Failed to send letter. Please try again.');
+   485→    } finally {
+   486→      setSending(false);
+   487→    }
+   488→  }, [dispute, letterPreview, selectedTemplate, onOpenChange]);
+   489→
+   490→  const handleDownloadPdf = useCallback(() => {
+   491→    toast.success('PDF ready for download');
+   492→  }, []);
+   493→
+   494→  if (!dispute) return null;
+   495→
+   496→  const accountName = dispute.reportItem?.accountName ?? 'Unknown Account';
+   497→  const creditorName =
+   498→    dispute.reportItem?.creditorName ?? dispute.targetName ?? 'Unknown Creditor';
+   499→  const conf = dispute.confidence ?? 0;
+   500→
+   501→  return (
+   502→    <Dialog open={open} onOpenChange={onOpenChange}>
+   503→      <DialogContent className="flex h-[85vh] max-w-5xl flex-col gap-0 p-0 sm:max-w-5xl">
+   504→        <DialogHeader className="border-b px-6 py-4">
+   505→          <DialogTitle className="flex items-center gap-2">
+   506→            <FileText className="size-5 text-primary" />
+   507→            {accountName}
+   508→          </DialogTitle>
+   509→          <DialogDescription>{creditorName}</DialogDescription>
+   510→        </DialogHeader>
+   511→
+   512→        <div className="flex flex-1 overflow-hidden lg:flex-row">
+   513→          {/* ---- Left Panel: Dispute Details ---- */}
+   514→          <div className="flex w-full flex-col border-r lg:w-1/2">
+   515→            <ScrollArea className="flex-1">
+   516→              <div className="space-y-5 p-6">
+   517→                {/* Status & confidence */}
+   518→                <div>
+   519→                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   520→                    Status
+   521→                  </h4>
+   522→                  <div className="flex flex-wrap items-center gap-2">
+   523→                    <Badge
+   524→                      variant="outline"
+   525→                      className={cn(
+   526→                        'text-xs capitalize',
+   527→                        disputeStatusColor(dispute.status)
+   528→                      )}
+   529→                    >
+   530→                      {formatStatus(dispute.status)}
+   531→                    </Badge>
+   532→                    {conf > 0 && (
+   533→                      <div className="flex items-center gap-2">
+   534→                        <Progress
+   535→                          value={conf}
+   536→                          className={cn(
+   537→                            'h-2 w-16',
+   538→                          confidenceBarColor(conf)
+   539→                        )}
+   540→                        />
+   541→                        <span className="text-xs text-muted-foreground">
+   542→                          {conf}%
+   543→                        </span>
+   544→                      </div>
+   545→                    )}
+   546→                  </div>
+   547→                </div>
+   548→
+   549→                {/* Dispute info */}
+   550→                <div>
+   551→                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   552→                    Dispute Details
+   553→                  </h4>
+   554→                  <dl className="space-y-2 text-sm">
+   555→                    <div className="flex justify-between">
+   556→                      <dt className="text-muted-foreground">Type</dt>
+   557→                      <dd className="font-medium">
+   558→                        <Badge
+   559→                          variant="outline"
+   560→                          className={cn(
+   561→                            'text-[11px] capitalize',
+   562→                            disputeTypeColor(dispute.disputeType)
+   563→                          )}
+   564→                        >
+   565→                          {formatDisputeType(dispute.disputeType)}
+   566→                        </Badge>
+   567→                      </dd>
+   568→                    </div>
+   569→                    {dispute.strategy && (
+   570→                      <div className="flex justify-between">
+   571→                        <dt className="text-muted-foreground">Strategy</dt>
+   572→                        <dd className="font-medium capitalize">
+   573→                          {dispute.strategy.replace(/-/g, ' ')}
+   574→                        </dd>
+   575→                      </div>
+   576→                    )}
+   577→                    <div className="flex justify-between">
+   578→                      <dt className="text-muted-foreground">Created</dt>
+   579→                      <dd className="font-medium">
+   580→                        {formatDate(dispute.createdAt)}
+   581→                      </dd>
+   582→                    </div>
+   583→                    {dispute.sentDate && (
+   584→                      <div className="flex justify-between">
+   585→                        <dt className="text-muted-foreground">Sent</dt>
+   586→                        <dd className="font-medium">
+   587→                          {formatDate(dispute.sentDate)}
+   588→                        </dd>
+   589→                      </div>
+   590→                    )}
+   591→                    {dispute.outcome && (
+   592→                      <div className="flex justify-between">
+   593→                        <dt className="text-muted-foreground">Outcome</dt>
+   594→                        <dd className="font-medium capitalize">
+   595→                          {dispute.outcome.replace(/-/g, ' ')}
+   596→                        </dd>
+   597→                      </div>
+   598→                    )}
+   599→                    {dispute.targetName && (
+   600→                      <div className="flex justify-between">
+   601→                        <dt className="text-muted-foreground">Target</dt>
+   602→                        <dd className="max-w-[200px] truncate text-right font-medium">
+   603→                          {dispute.targetName}
+   604→                        </dd>
+   605→                      </div>
+   606→                    )}
+   607→                  </dl>
+   608→                </div>
+   609→
+   610→                {/* Legal basis */}
+   611→                {dispute.legalBasis && (
+   612→                  <div>
+   613→                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   614→                      Legal Basis
+   615→                    </h4>
+   616→                    <div className="rounded-md border bg-muted/50 p-3">
+   617→                      <p className="text-sm">
+   618→                        <Scale className="mr-1.5 inline-block size-3 text-primary" />
+   619→                        {dispute.legalBasis}
+   620→                      </p>
+   621→                    </div>
+   622→                  </div>
+   623→                )}
+   624→
+   625→                {/* Reason */}
+   626→                {dispute.reason && (
+   627→                  <div>
+   628→                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   629→                      Reason
+   630→                    </h4>
+   631→                    <p className="text-sm text-muted-foreground">
+   632→                      {dispute.reason}
+   633→                    </p>
+   634→                  </div>
+   635→                )}
+   636→
+   637→                {/* Notes */}
+   638→                {dispute.notes && (
+   639→                  <div>
+   640→                    <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   641→                      Notes
+   642→                    </h4>
+   643→                    <p className="text-sm text-muted-foreground">
+   644→                      {dispute.notes}
+   645→                    </p>
+   646→                  </div>
+   647→                )}
+   648→
+   649→                <Separator />
+   650→
+   651→                {/* Related deadlines */}
+   652→                <div>
+   653→                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   654→                  Related Deadlines
+   655→                  </h4>
+   656→                  {dispute.deadlines.length === 0 ? (
+   657→                    <p className="text-sm text-muted-foreground">
+   658→                      No deadlines associated.
+   659→                    </p>
+   660→                  ) : (
+   661→                    <div className="space-y-2">
+   662→                      {dispute.deadlines.map((dl) => {
+   663→                        const due = new Date(dl.dueDate);
+   664→                        const now = new Date();
+   665→                        const daysLeft = Math.ceil(
+   666→                          (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+   667→                        );
+   668→                        return (
+   669→                          <div
+   670→                            key={dl.id}
+   671→                            className="flex items-center justify-between rounded-md border p-2.5"
+   672→                          >
+   673→                            <div className="min-w-0 flex-1">
+   674→                              <p className="truncate text-sm font-medium">
+   675→                                {dl.title}
+   676→                              </p>
+   677→                              <p className="text-xs text-muted-foreground">
+   678→                                {formatShortDate(dl.dueDate)}
+   679→                              </p>
+   680→                            </div>
+   681→                            <Badge
+   682→                              variant="outline"
+   683→                              className={cn(
+   684→                                'ml-2 shrink-0 text-[11px]',
+   685→                                dl.isCompleted
+   686→n                                  ? 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800'
+   687→                                  : daysLeft < 0
+   688→                                    ? 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800'
+   689→                                    : daysLeft < 7
+   690→                                      ? 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800'
+   691→                                      : 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/50 dark:text-slate-300 dark:border-slate-700'
+   692→                              )}
+   693→                            >
+   694→                              {dl.isCompleted
+   695→n                                ? 'Completed'
+   696→                                : daysLeft < 0
+   697→                                  ? `${Math.abs(daysLeft)}d overdue`
+   698→                                  : daysLeft === 0
+   699→                                    ? 'Due today'
+   700→                                    : `${daysLeft}d left`}
+   701→                            </Badge>
+   702→                          </div>
+   703→                        );
+   704→                      })}
+   705→                    </div>
+   706→                  )}
+   707→                </div>
+   708→
+   709→                {/* Letter history */}
+   710→                <div>
+   711→                  <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+   712→                  Letter History
+   713→                  </h4>
+   714→                  {dispute.letters.length === 0 ? (
+   715→                    <p className="text-sm text-muted-foreground">
+   716→                      No letters generated yet.
+   717→                    </p>
+   718→                  ) : (
+   719→                    <div className="space-y-2">
+   720→                      {dispute.letters.map((letter) => (
+   721→                        <div
+   722→                          key={letter.id}
+   723→                          className="flex items-center justify-between rounded-md border p-2.5"
+   724→                        >
+   725→                          <div className="min-w-0 flex-1">
+   726→                            <p className="truncate text-sm font-medium">
+   727→                              {letter.templateType.replace(/-/g, ' ')}
+   728→                            </p>
+   729→                            <p className="text-xs text-muted-foreground">
+   730→                              {formatShortDate(letter.createdAt)}
+   731→                              {letter.recipientName
+   732→                                ? ` → ${letter.recipientName}`
+   733→                                : ''}
+   734→                            </p>
+   735→                          </div>
+   736→                          <Badge
+   737→                            variant="outline"
+   738→                            className="ml-2 shrink-0 text-[11px] capitalize"
+   739→                          >
+   740→                            {letter.status}
+   741→                          </Badge>
+   742→                        </div>
+   743→                      ))}
+   744→                    </div>
+   745→                  )}
+   746→                </div>
+   747→              </div>
+   748→            </ScrollArea>
+   749→          </div>
+   750→
+   751→          {/* ---- Right Panel: Letter Generation ---- */}
+   752→          <div className="flex w-full flex-col lg:w-1/2">
+   753→            <div className="border-b px-6 py-4">
+   754→              <h3 className="text-sm font-semibold">Letter Generation</h3>
+   755→              <p className="text-xs text-muted-foreground">
+   756→                Select a template and generate your dispute letter.
+   757→              </p>
+   758→            </div>
+   759→
+   760→            <ScrollArea className="flex-1">
+   761→              <div className="space-y-4 p-6">
+   762→                {/* Template selector */}
+   763→                <div className="space-y-2">
+   764→                  <Label htmlFor="template-select">Template</Label>
+   765→                  <Select
+   766→                    value={selectedTemplate}
+   767→                    onValueChange={setSelectedTemplate}
+   768→                  >
+   769→                    <SelectTrigger id="template-select">
+   770→                      <SelectValue placeholder="Choose a letter template..." />
+   771→                    </SelectTrigger>
+   772→                    <SelectContent>
+   773→                      {TEMPLATE_CATALOG.map((t) => (
+   774→                        <SelectItem key={t.id} value={t.id}>
+   775→                          <span className="flex items-center gap-2">
+   776→                            {t.id === recommendedTemplate && (
+   777→                              <Badge
+   778→                                variant="secondary"
+   779→                                className="px-1.5 py-0 text-[10px]"
+   780→                              >
+   781→                                Recommended
+   782→                              </Badge>
+   783→                            )}
+   784→                            {t.name}
+   785→                          </span>
+   786→                        </SelectItem>
+   787→                      ))}
+   788→                    </SelectContent>
+   789→                  </Select>
+   790→                </div>
+   791→
+   792→                {/* Template info */}
+   793→                {selectedTemplate && (
+   794→                  <div className="rounded-md border bg-muted/50 p-3">
+   795→                    <p className="text-xs text-muted-foreground">
+   796→                      {TEMPLATE_CATALOG.find((t) => t.id === selectedTemplate)
+   797→                        ?.description}
+   798→                    </p>
+   799→                    <p className="mt-1 text-xs font-medium text-primary">
+   800→                      <Shield className="mr-1 inline-block size-3" />
+   801→                      {
+   802→                        TEMPLATE_CATALOG.find((t) => t.id === selectedTemplate)
+   803→                          ?.legalBasis
+   804→                      }
+   805→                    </p>
+   806→                  </div>
+   807→                )}
+   808→
+   809→                {/* Recipient info (auto-filled) */}
+   810→                {selectedTemplate && dispute.targetName && (
+   811→                  <div className="space-y-1.5">
+   812→                    <Label className="text-xs text-muted-foreground">
+   813→                      Recipient
+   814→                    </Label>
+   815→                    <div className="rounded-md border p-3 text-sm">
+   816→                      <p className="font-medium">{dispute.targetName}</p>
+   817→                      {dispute.targetAddress && (
+   818→                        <p className="text-xs text-muted-foreground">
+   819→                          {dispute.targetAddress}
+   820→                        </p>
+   821→                      )}
+   822→                    </div>
+   823→                  </div>
+   824→                )}
+   825→
+   826→                {/* Generate button */}
+   827→                <Button
+   828→                  className="w-full"
+   829→                  disabled={!selectedTemplate || generating}
+   830→                  onClick={handleGenerateLetter}
+   831→                >
+   832→                  {generating ? (
+   833→                    <>
+   834→                      <Loader2 className="mr-2 size-4 animate-spin" />
+   835→                      Generating...
+   836→                    </>
+   837→                  ) : (
+   838→                    <>
+   839→                      <FileText className="mr-2 size-4" />
+   840→                      Generate Letter
+   841→                    </>
+   842→                  )}
+   843→                </Button>
+   844→
+   845→                {/* Letter preview */}
+   846→                {letterPreview && (
+   847→                  <div className="space-y-3">
+   848→                    <div className="flex items-center justify-between">
+   849→                      <Label>Letter Preview</Label>
+   850→                      <Badge variant="secondary" className="text-[10px]">
+   851→                        Generated
+   852→                      </Badge>
+   853→                    </div>
+   854→                    <div className="max-h-[300px] overflow-hidden rounded-md border">
+   855→                      <ScrollArea className="h-[300px]">
+   856→                        <pre className="whitespace-pre-wrap p-4 text-xs leading-relaxed text-foreground/90 [font-family:monospace]">
+   857→                          {letterPreview}
+   858→                        </pre>
+   859→                      </ScrollArea>
+   860→                    </div>
+   861→
+   862→                    <Separator />
+   863→
+   864→                    {/* Disclaimer checkbox */}
+   865→                    <div className="flex items-start gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-800 dark:bg-amber-900/20">
+   866→                      <Checkbox
+   867→                        id="disclaimer-check"
+   868→                        checked={disclaimerChecked}
+   869→                        onCheckedChange={(checked) =>
+   870→                          setDisclaimerChecked(checked === true)
+   871→                        }
+   872→                        className="mt-0.5"
+   873→                      />
+   874→                      <Label
+   875→                        htmlFor="disclaimer-check"
+   876→                        className="cursor-pointer text-xs leading-relaxed text-amber-900 dark:text-amber-200"
+   877→                      >
+   878→                        <AlertTriangle className="mr-1 inline-block size-3" />
+   879→                        I understand this letter is for informational purposes only
+   880→                        and does not constitute legal advice. I am responsible for
+   881→                        reviewing the content for accuracy before sending.
+   882→                      </Label>
+   883→                    </div>
+   884→
+   885→                    {/* Action buttons */}
+   886→                    <div className="flex flex-col gap-2 sm:flex-row">
+   887→                      <Button
+   888→                        className="flex-1"
+   889→                        disabled={!disclaimerChecked || sending}
+   890→                        onClick={handleApproveAndSend}
+   891→                      >
+   892→                        {sending ? (
+   893→                          <>
+   894→                            <Loader2 className="mr-2 size-4 animate-spin" />
+   895→                            Sending...
+   896→                          </>
+   897→                        ) : (
+   898→                          <>
+   899→                            <Send className="mr-2 size-4" />
+   900→                            Approve & Send
+   901→                          </>
+   902→                        )}
+   903→                      </Button>
+   904→                      <Button
+   905→                        variant="outline"
+   906→                        className="flex-1"
+   907→                        onClick={handleDownloadPdf}
+   908→                      >
+   909→                        <Download className="mr-2 size-4" />
+   910→                        Download PDF
+   911→                      </Button>
+   912→                    </div>
+   913→                  </div>
+   914→                )}
+   915→              </div>
+   916→            </ScrollArea>
+   917→          </div>
+   918→        </div>
+   919→      </DialogContent>
+   920→    </Dialog>
+   921→  );
+   922→}
+   923→
+   924→// ---------------------------------------------------------------------------
+   925→// Disputes Page
+   926→// ---------------------------------------------------------------------------
+   927→
+   928→export function DisputesPage() {
+   929→  const userId = useAppStore((s) => s.userId);
+   930→
+   931→  const [disputes, setDisputes] = useState<Dispute[]>([]);
+   932→  const [loading, setLoading] = useState(true);
+   933→  const [error, setError] = useState<string | null>(null);
+   934→  const [activeTab, setActiveTab] = useState('all');
+   935→  const [typeFilter, setTypeFilter] = useState('all');
+   936→  const [searchQuery, setSearchQuery] = useState('');
+   937→  const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
+   938→  const [dialogOpen, setDialogOpen] = useState(false);
+   939→
+   940→  // Fetch disputes
+   941→  useEffect(() => {
+   942→    if (!userId) return;
+   943→    let cancelled = false;
+   944→
+   945→    async function fetchDisputes() {
+   946→      try {
+   947→        setLoading(true);
+   948→        setError(null);
+   949→        const res = await fetch(
+   950→          `/api/disputes?userId=${encodeURIComponent(userId)}`
+   951→        );
+   952→        if (!res.ok) throw new Error('Failed to fetch disputes');
+   953→        const json = await res.json();
+   954→        if (!cancelled) {
+   955→          setDisputes(json.data ?? []);
+   956→        }
+   957→      } catch (err) {
+   958→        if (!cancelled) {
+   959→          setError(
+   960→            err instanceof Error ? err.message : 'An error occurred'
+   961→          );
+   962→        }
+   963→      } finally {
+   964→        if (!cancelled) setLoading(false);
+   965→      }
+   966→    }
+   967→
+   968→    fetchDisputes();
+   969→    return () => {
+   970→      cancelled = true;
+   971→    };
+   972→  }, [userId]);
+   973→
+   974→  // Unique dispute types for filter dropdown
+   975→  const disputeTypes = useMemo(() => {
+   976→    const types = new Set(disputes.map((d) => d.disputeType));
+   977→    return Array.from(types).sort();
+   978→  }, [disputes]);
+   979→
+   980→  // Filtered disputes
+   981→  const filteredDisputes = useMemo(() => {
+   982→    let result = disputes;
+   983→
+   984→    // Tab filter
+   985→    if (activeTab !== 'all') {
+   986→      result = result.filter((d) => d.status === activeTab);
+   987→    }
+   988→
+   989→    // Type filter
+   990→    if (typeFilter !== 'all') {
+   991→      result = result.filter((d) => d.disputeType === typeFilter);
+   992→    }
+   993→
+   994→    // Search filter
+   995→    if (searchQuery.trim()) {
+   996→      const q = searchQuery.toLowerCase();
+   997→      result = result.filter(
+   998→        (d) =>
+   999→          (d.reportItem?.accountName ?? '').toLowerCase().includes(q) ||
+  1000→          (d.reportItem?.creditorName ?? '').toLowerCase().includes(q) ||
+  1001→          (d.targetName ?? '').toLowerCase().includes(q)
+  1002→      );
+  1003→    }
+  1004→
+  1005→    return result;
+  1006→  }, [disputes, activeTab, typeFilter, searchQuery]);
+  1007→
+  1008→  const handleViewDispute = useCallback((dispute: Dispute) => {
+  1009→    setSelectedDispute(dispute);
+  1010→    setDialogOpen(true);
+  1011→  }, []);
+  1012→
+  1013→  // ---- Loading state ----
+  1014→  if (loading) {
+  1015→    return <DisputesSkeleton />;
+  1016→  }
+  1017→
+  1018→  // ---- Error state ----
+  1019→  if (error) {
+  1020→    return (
+  1021→      <Card>
+  1022→        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+  1023→          <div className="flex size-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+  1024→            <AlertTriangle className="size-8 text-red-600 dark:text-red-400" />
+  1025→          </div>
+  1026→          <h3 className="mt-4 text-lg font-semibold">Error Loading Disputes</h3>
+  1027→          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+  1028→          <Button
+  1029→            variant="outline"
+  1030→            className="mt-4"
+  1031→            onClick={() => window.location.reload()}
+  1032→          >
+  1033→            Retry
+  1034→          </Button>
+  1035→        </CardContent>
+  1036→      </Card>
+  1037→    );
+  1038→  }
+  1039→  // ---- Empty state ----
+  1040→  if (disputes.length === 0) {
+  1041→    return (
+  1042→      <Card>
+  1043→        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+  1044→          <div className="flex size-16 items-center justify-center rounded-full bg-muted">
+  1045→            <Inbox className="size-8 text-muted-foreground" />
+  1046→          </div>
+  1047→          <h3 className="mt-4 text-lg font-semibold">No Disputes Yet</h3>
+  1048→          <p className="mt-1 max-w-sm text-sm text-muted-foreground">
+  1049→            Upload a credit report and run an analysis to identify disputable items
+  1050→            on your credit report.
+  1051→          </p>
+  1052→          <Button
+  1053→            className="mt-4"
+  1054→            onClick={() => useAppStore.getState().setCurrentPage('upload')}
+  1055→          >
+  1056→            <FileText className="mr-2 size-4" />
+  1057→            Upload Report
+  1058→          </Button>
+  1059→        </CardContent>
+  1060→      </Card>
+  1061→    );
+  1062→  }
+  1063→
+  1064→  return (
+  1065→    <div className="space-y-4">
+  1066→      {/* ---- Tabs ---- */}
+  1067→      <Tabs value={activeTab} onValueChange={setActiveTab}>
+  1068→        <TabsList className="w-full overflow-x-auto">
+  1069→          {STATUS_TABS.map((tab) => (
+  1070→            <TabsTrigger key={tab.value} value={tab.value} className="text-xs">
+  1071→              {tab.label}
+  1072→              {tab.value !== 'all' && (
+  1073→                <span className="ml-1.5 rounded-full bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] font-medium">
+  1074→                  {disputes.filter(
+  1075→                    (d) => tab.value === 'all' || d.status === tab.value
+  1076→                  ).length}
+  1077→                </span>
+  1078→              )}
+  1079→            </TabsTrigger>
+  1080→          ))}
+  1081→        </TabsList>
+  1082→
+  1083→        {STATUS_TABS.map((tab) => (
+  1084→          <TabsContent key={tab.value} value={tab.value}>
+  1085→            {/* ---- Search & Filter ---- */}
+  1086→            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+  1087→              <div className="relative max-w-sm flex-1">
+  1088→                <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+  1089→                <Input
+  1090→                  placeholder="Search by account name or creditor..."
+  1091→                  className="pl-9"
+  1092→                  value={searchQuery}
+  1093→                  onChange={(e) => setSearchQuery(e.target.value)}
+  1094→                />
+  1095→              </div>
+  1096→              <Select value={typeFilter} onValueChange={setTypeFilter}>
+  1097→                <SelectTrigger className="w-full sm:w-[200px]">
+  1098→                  <SelectValue placeholder="Filter by type..." />
+  1099→                </SelectTrigger>
+  1100→                <SelectContent>
+  1101→                  <SelectItem value="all">All Types</SelectItem>
+  1102→                  {disputeTypes.map((type) => (
+  1103→                    <SelectItem key={type} value={type}>
+  1104→                      {formatDisputeType(type)}
+  1105→                    </SelectItem>
+  1106→                  ))}
+  1107→                </SelectContent>
+  1108→              </Select>
+  1109→            </div>
+  1110→
+  1111→            {/* ---- Dispute list ---- */}
+  1112→            {filteredDisputes.length === 0 ? (
+  1113→              <Card>
+  1114→                <CardContent className="flex flex-col items-center justify-center py-10 text-center">
+  1115→                  <Inbox className="size-8 text-muted-foreground" />
+  1116→                  <p className="mt-2 text-sm font-medium text-muted-foreground">
+  1117→                    No disputes match your filters.
+  1118→                  </p>
+  1119→                  <Button
+  1120→                    variant="ghost"
+  1121→                    className="mt-2 text-xs"
+  1122→                    onClick={() => {
+  1123→                      setTypeFilter('all');
+  1124→                      setSearchQuery('');
+  1125→                    }}
+  1126→                  >
+  1127→                    Clear filters
+  1128→                  </Button>
+  1129→                </CardContent>
+  1130→              </Card>
+  1131→            ) : (
+  1132→              <div className="space-y-3">
+  1133→                {filteredDisputes.map((dispute) => (
+  1134→                  <DisputeCard
+  1135→                    key={dispute.id}
+  1136→                    dispute={dispute}
+  1137→                    onView={() => handleViewDispute(dispute)}
+  1138→                  />
+  1139→                ))}
+  1140→              </div>
+  1141→            )}
+  1142→          </TabsContent>
+  1143→        ))}
+  1144→      </Tabs>
+  1145→
+  1146→      {/* ---- Detail Dialog ---- */}
+  1147→      <DisputeDetailDialog
+  1148→        dispute={selectedDispute}
+  1149→        open={dialogOpen}
+  1150→        onOpenChange={setDialogOpen}
+  1151→      />
+  1152→    </div>
+  1153→  );
+  1154→}
+  1155→

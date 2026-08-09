@@ -1,0 +1,974 @@
+     1→// ---------------------------------------------------------------------------
+     2→// CreditShield AI — Legal Letter Templates
+     3→// FCRA, FDCPA, and CFPB-compliant dispute & request letter generators.
+     4→// ---------------------------------------------------------------------------
+     5→
+     6→import { formatDateLong } from './sol-data';
+     7→
+     8→// ---------------------------------------------------------------------------
+     9→// Base Types
+    10→// ---------------------------------------------------------------------------
+    11→
+    12→export type LetterParams = {
+    13→  userName: string;
+    14→  userAddress: string;
+    15→  userCity: string;
+    16→  userState: string;
+    17→  userZip: string;
+    18→  accountNumber: string;
+    19→  creditorName: string;
+    20→  amount: string;
+    21→  /** ISO date string (YYYY-MM-DD) */
+    22→  date: string;
+    23→  reason?: string;
+    24→};
+    25→
+    26→export type BureauDisputeParams = LetterParams & {
+    27→  bureauName: string;
+    28→  bureauAddress: string;
+    29→  reportReferenceNumber?: string;
+    30→  disputedItems: string[];
+    31→};
+    32→
+    33→export type FurnisherDisputeParams = LetterParams & {
+    34→  furnisherAddress?: string;
+    35→  originalCreditor?: string;
+    36→};
+    37→
+    38→export type DebtValidationParams = LetterParams & {
+    39→  collectorName: string;
+    40→  collectorAddress: string;
+    41→  originalCreditor?: string;
+    42→  noticeDate?: string;
+    43→  collectorAccountNumber?: string;
+    44→};
+    45→
+    46→export type CeaseDesistParams = LetterParams & {
+    47→  collectorName: string;
+    48→  collectorAddress: string;
+    49→  prohibitPhoneCalls?: boolean;
+    50→  prohibitWorkplaceContact?: boolean;
+    51→};
+    52→
+    53→export type GoodwillParams = LetterParams & {
+    54→  latePaymentDates: string[];
+    55→  explanation?: string;
+    56→  positiveHistoryYears?: number;
+    57→};
+    58→
+    59→export type PayForDeleteParams = LetterParams & {
+    60→  settlementAmount: string;
+    61→  settlementPercentage?: string;
+    62→  responseDeadline?: string;
+    63→};
+    64→
+    65→export type IdentityTheftParams = LetterParams & {
+    66→  ftcReportNumber: string;
+    67→  policeReportNumber?: string;
+    68→  discoveryDate: string;
+    69→  blockScope: 'full' | 'specific';
+    70→  disputedItems?: string[];
+    71→};
+    72→
+    73→export type MedicalDebtParams = LetterParams & {
+    74→  medicalProvider?: string;
+    75→  dateOfService?: string;
+    76→  insuranceCompany?: string;
+    77→  claimNumber?: string;
+    78→  disputeReason: 'paid_by_insurance' | 'not_my_debt' | 'billing_error' | 'already_paid' | 'under_review';
+    79→  disputedItems?: string[];
+    80→};
+    81→
+    82→export type DuplicateReportingParams = LetterParams & {
+    83→  duplicateAccountNumbers: string[];
+    84→  bureauName: string;
+    85→  bureauAddress: string;
+    86→};
+    87→
+    88→export type FrivolousCounterParams = LetterParams & {
+    89→  bureauName: string;
+    90→  bureauAddress: string;
+    91→  frivolousDeterminationDate: string;
+    92→  bureauReferenceNumber?: string;
+    93→  additionalDocumentation: string[];
+    94→  previousDisputeDates: string[];
+    95→};
+    96→
+    97→export type AuthorizedUserParams = LetterParams & {
+    98→  primaryCardholderName: string;
+    99→  dateAdded?: string;
+   100→  removalReason: 'never_authorized' | 'divorce_separation' | 'no_longer_relationship' | 'account_negative';
+   101→  bureauName?: string;
+   102→};
+   103→
+   104→export type CfpbComplaintParams = LetterParams & {
+   105→  companyName: string;
+   106→  companyAddress?: string;
+   107→  product: string;
+   108→  subProduct?: string;
+   109→  issue: string;
+   110→  desiredResolution: string;
+   111→  previousAttempts?: string;
+   112→  previousAttemptDates?: string[];
+   113→};
+   114→
+   115→export type EscalationParams = LetterParams & {
+   116→  executiveName?: string;
+   117→  executiveTitle?: string;
+   118→  companyName: string;
+   119→  companyAddress: string;
+   120→  previousCorrespondenceDates: string[];
+   121→  previousReferenceNumbers?: string[];
+   122→  unresolvedIssues: string[];
+   123→  desiredResolution: string;
+   124→  responseDeadline?: string;
+   125→};
+   126→
+   127→export type TemplateCatalogEntry = {
+   128→  id: string;
+   129→  name: string;
+   130→  description: string;
+   131→  legalBasis: string;
+   132→  templateFn: (params: Record<string, unknown>) => string;
+   133→  requiredFields: string[];
+   134→};
+   135→
+   136→// ---------------------------------------------------------------------------
+   137→// Legal Disclaimer (appended to every letter)
+   138→// ---------------------------------------------------------------------------
+   139→
+   140→const LEGAL_DISCLAIMER =
+   141→  'This communication is not legal advice. The sender is exercising their rights under applicable federal and state law.';
+   142→
+   143→function buildLetter(parts: {
+   144→  recipientAddress?: string;
+   145→  body: string;
+   146→  recipientName?: string;
+   147→  subject?: string;
+   148→  referenceLine?: string;
+   149→}): string {
+   150→  const { recipientAddress, body, recipientName, subject, referenceLine } = parts;
+   151→  const today = new Date().toLocaleDateString('en-US', {
+   152→    year: 'numeric',
+   153→    month: 'long',
+   154→    day: 'numeric',
+   155→  });
+   156→  const lines: string[] = [];
+   157→  lines.push(today);
+   158→  lines.push('');
+   159→  if (recipientName) lines.push(recipientName);
+   160→  if (recipientAddress) lines.push(recipientAddress);
+   161→  lines.push('');
+   162→  if (subject) {
+   163→    lines.push(`Re: ${subject}`);
+   164→    lines.push('');
+   165→  }
+   166→  if (referenceLine) {
+   167→    lines.push(referenceLine);
+   168→    lines.push('');
+   169→  }
+   170→  lines.push(body.trim());
+   171→  lines.push('');
+   172→  lines.push(LEGAL_DISCLAIMER);
+   173→  lines.push('');
+   174→  return lines.join('\n');
+   175→}
+   176→
+   177→function signatureBlock(userName: string, userAddress: string, userCity: string, userState: string, userZip: string): string {
+   178→  return `Sincerely,\n\n${userName}\n${userAddress}\n${userCity}, ${userState} ${userZip}`;
+   179→}
+   180→
+   181→// ---------------------------------------------------------------------------
+   182→// 1. FCRA \u00a7 609 — Request for File Disclosure
+   183→// ---------------------------------------------------------------------------
+   184→
+   185→export function generate609Letter(params: BureauDisputeParams): string {
+   186→  const { userName, userAddress, userCity, userState, userZip, bureauName, bureauAddress } = params;
+   187→
+   188→  const body = `Dear ${bureauName},
+   189→
+   190→I am writing to request a complete copy of my consumer credit file, pursuant to my rights under the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681g(a)(1) (Section 609).
+   191→
+   192→Under FCRA \u00a7 609(a)(1), every consumer reporting agency is required to disclose to a consumer, upon request, all information in the consumer's file at the time of the request. This includes, but is not limited to:
+   193→
+   194→  \u2022 All information in my credit file, including sources;
+   195→  \u2022 All records of inquiries made regarding my file;
+   196→  \u2022 The current credit score, if a score has been generated;
+   197→  \u2022 A list of any persons or entities that have obtained a copy of my credit report within the past two years (or one year for employment purposes);
+   198→  \u2022 All information regarding any items that have been the subject of a dispute.
+   199→
+   200→Please provide a complete copy of my consumer file within fifteen (15) days of receipt of this letter, as required under 15 U.S.C. \u00a7 1681i(a)(1).
+   201→
+   202→If you are unable to provide a complete disclosure, please identify in writing the specific information that is being withheld and the reason for such withholding.
+   203→
+   204→Please send all correspondence to the address listed below.
+   205→
+   206→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   207→
+   208→  return buildLetter({
+   209→    recipientName: bureauName,
+   210→    recipientAddress: bureauAddress,
+   211→    subject: `FCRA \u00a7 609 Request for Full File Disclosure \u2014 ${userName}`,
+   212→    body,
+   213→  });
+   214→}
+   215→
+   216→// ---------------------------------------------------------------------------
+   217→// 2. FCRA \u00a7 611 — Dispute to Credit Bureaus
+   218→// ---------------------------------------------------------------------------
+   219→
+   220→export function generate611Letter(params: BureauDisputeParams): string {
+   221→  const {
+   222→    userName, userAddress, userCity, userState, userZip,
+   223→    bureauName, bureauAddress, reportReferenceNumber, disputedItems,
+   224→  } = params;
+   225→
+   226→  const itemList = disputedItems.map((item, i) => `${i + 1}. ${item}`).join('\n');
+   227→
+   228→  const body = `Dear ${bureauName},
+   229→
+   230→I am writing to dispute the following information that appears on my consumer credit report. Pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681i(a)(1) (Section 611), I hereby request that you conduct a reasonable reinvestigation of the items listed below.
+   231→
+   232→Under FCRA \u00a7 611(a)(1), if the completeness or accuracy of any item of information contained in a consumer's file at a consumer reporting agency is disputed by the consumer and the consumer notifies the agency of such dispute, the agency shall conduct a reasonable reinvestigation to determine whether the disputed information is inaccurate.
+   233→
+   234→The following items are either inaccurate, incomplete, or unverifiable:
+   235→
+   236→${itemList}
+   237→
+   238→I am requesting that you:
+   239→
+   240→  1. Conduct a reasonable reinvestigation of each disputed item within thirty (30) days, as required by 15 U.S.C. \u00a7 1681i(a)(1);
+   241→  2. Delete or modify the disputed information if it is found to be inaccurate, incomplete, or unverifiable;
+   242→  3. Provide me with a corrected copy of my credit report upon completion of the reinvestigation;
+   243→  4. Notify each furnisher of the disputed information that the information is disputed, as required by 15 U.S.C. \u00a7 1681i(a)(2).
+   244→
+   245→${reportReferenceNumber ? `Reference Number: ${reportReferenceNumber}\n` : ''}
+   246→Please send all correspondence and results to the address listed below.
+   247→
+   248→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   249→
+   250→  return buildLetter({
+   251→    recipientName: bureauName,
+   252→    recipientAddress: bureauAddress,
+   253→    subject: `FCRA \u00a7 611 Dispute of Inaccurate Information \u2014 ${userName}`,
+   254→    referenceLine: reportReferenceNumber ? `Reference Number: ${reportReferenceNumber}` : undefined,
+   255→    body,
+   256→  });
+   257→}
+   258→
+   259→// ---------------------------------------------------------------------------
+   260→// 3. FCRA \u00a7 623 — Dispute to Furnishers (Direct Dispute)
+   261→// ---------------------------------------------------------------------------
+   262→
+   263→export function generate623Letter(params: FurnisherDisputeParams): string {
+   264→  const { userName, userAddress, userCity, userState, userZip, accountNumber, creditorName, amount, date, reason } = params;
+   265→
+   266→  const body = `Dear ${creditorName},
+   267→
+   268→I am writing to directly dispute the accuracy of information you have furnished to one or more consumer reporting agencies regarding the account listed below. Pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681s-2(a)(3) (Section 623), and Regulation V, 12 C.F.R. \u00a7 1022.43, I hereby submit a direct dispute to you as the furnisher of this information.
+   269→
+   270→Account Information:
+   271→  \u2022 Account Number: ${accountNumber}
+   272→  \u2022 Amount in Dispute: ${amount}
+   273→  \u2022 Date of Last Activity: ${formatDateLong(date)}
+   274→  ${reason ? `\u2022 Reason for Dispute: ${reason}` : ''}
+   275→
+   276→Under FCRA \u00a7 623(a)(3), if a consumer disputes the accuracy of any information furnished by a person to a consumer reporting agency, and the dispute is directly conveyed to the person by the consumer, the person shall conduct a reasonable investigation with respect to the disputed information and review all relevant information provided by the consumer reporting agency, the consumer, and any other information source.
+   277→
+   278→I am requesting that you:
+   279→
+   280→  1. Conduct a reasonable investigation within thirty (30) days of receiving this notice, as required by 15 U.S.C. \u00a7 1681s-2(a)(4);
+   281→  2. Report the results of your investigation to all consumer reporting agencies to which you furnished the disputed information;
+   282→  3. If the information is found to be inaccurate or incomplete, promptly notify each consumer reporting agency to which the information was furnished of the necessary corrections;
+   283→  4. Provide me with the results of your investigation in writing, including any corrected information.
+   284→
+   285→Please send all correspondence to the address listed below.
+   286→
+   287→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   288→
+   289→  return buildLetter({
+   290→    recipientName: creditorName,
+   291→    subject: `FCRA \u00a7 623 Direct Dispute \u2014 Account ${accountNumber}`,
+   292→    body,
+   293→  });
+   294→}
+   295→
+   296→// ---------------------------------------------------------------------------
+   297→// 4. FDCPA \u00a7 809 — Debt Validation Request
+   298→// ---------------------------------------------------------------------------
+   299→
+   300→export function generateFdcpaValidation(params: DebtValidationParams): string {
+   301→  const {
+   302→    userName, userAddress, userCity, userState, userZip,
+   303→    accountNumber, collectorName, collectorAddress, amount,
+   304→    originalCreditor, noticeDate, collectorAccountNumber,
+   305→  } = params;
+   306→
+   307→  const acct = collectorAccountNumber ?? accountNumber;
+   308→
+   309→  const body = `Dear ${collectorName},
+   310→
+   311→I am writing in response to your ${noticeDate ? `notice dated ${formatDateLong(noticeDate)}` : 'collection notice'} regarding the above-referenced account. Pursuant to my rights under the Fair Debt Collection Practices Act (FDCPA), 15 U.S.C. \u00a7 1692g(a)(3) (Section 809), I hereby request validation of this alleged debt.
+   312→
+   313→Under FDCPA \u00a7 809(a), within five (5) days after the initial communication with a consumer in connection with the collection of any debt, a debt collector shall send the consumer a written notice containing the amount of the debt, the name of the creditor, and a statement that the consumer has thirty (30) days to dispute the validity of the debt.
+   314→
+   315→I dispute the validity of all or part of this debt. Please provide the following verification:
+   316→
+   317→  \u2022 The original signed application or contract creating this alleged debt;
+   318→  \u2022 A complete accounting and itemization of the amount claimed to be owed;
+   319→  \u2022 Any judgment or court order related to this debt;
+   320→  \u2022 Proof that your company has been assigned or authorized to collect this debt;
+   321→  \u2022 The name and address of the original creditor (if different from your company);
+   322→  \u2022 A copy of any assignment or transfer of this debt from the original creditor to your company;
+   323→  \u2022 Proof that the statute of limitations has not expired on this debt.
+   324→
+   325→Account Information:
+   326→  \u2022 Account Number: ${acct}
+   327→  \u2022 Amount Claimed: ${amount}
+   328→  ${originalCreditor ? `\u2022 Original Creditor: ${originalCreditor}` : ''}
+   329→
+   330→Please be advised that until you provide the requested validation, you may not continue to collect on this debt, and you must cease all collection activity, as required by 15 U.S.C. \u00a7 1692g(b). Please send all verification to the address listed below.
+   331→
+   332→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   333→
+   334→  return buildLetter({
+   335→    recipientName: collectorName,
+   336→    recipientAddress: collectorAddress,
+   337→    subject: `FDCPA \u00a7 809 Debt Validation Request \u2014 Account ${acct}`,
+   338→    body,
+   339→  });
+   340→}
+   341→
+   342→// ---------------------------------------------------------------------------
+   343→// 5. FDCPA \u00a7 805(c) — Cease and Desist
+   344→// ---------------------------------------------------------------------------
+   345→
+   346→export function generateCeaseDesist(params: CeaseDesistParams): string {
+   347→  const {
+   348→    userName, userAddress, userCity, userState, userZip,
+   349→    accountNumber, collectorName, collectorAddress, amount,
+   350→    prohibitPhoneCalls, prohibitWorkplaceContact,
+   351→  } = params;
+   352→
+   353→  const prohibitions: string[] = [
+   354→    'Immediately cease and desist all communication with me regarding the above-referenced debt.',
+   355→  ];
+   356→  if (prohibitPhoneCalls !== false) {
+   357→    prohibitions.push('Do not contact me by telephone at any number, including my cell phone, home phone, or any other telephone number associated with me.');
+   358→  }
+   359→  if (prohibitWorkplaceContact !== false) {
+   360→    prohibitions.push('Do not contact me at my place of employment or any workplace.');
+   361→  }
+   362→  prohibitions.push('You may only contact me to confirm that you will cease all collection efforts or to notify me of a specific remedy that you intend to pursue.');
+   363→
+   364→  const prohibitionList = prohibitions.map((p) => `  \u2022 ${p}`).join('\n');
+   365→
+   366→  const body = `Dear ${collectorName},
+   367→
+   368→I am exercising my right under the Fair Debt Collection Practices Act (FDCPA), 15 U.S.C. \u00a7 1692c(c) (Section 805(c)), to request that you immediately cease and desist all communication with me regarding the debt referenced below.
+   369→
+   370→Under FDCPA \u00a7 805(c), if a consumer notifies a debt collector in writing that the consumer refuses to pay a debt or that the consumer wishes the debt collector to cease further communication with the consumer, the debt collector shall not communicate further with the consumer with respect to such debt, except to advise the consumer that the debt collector's further efforts are being terminated or to notify the consumer that the debt collector or creditor may invoke specified remedies.
+   371→
+   372→Account Information:
+   373→  \u2022 Account Number: ${accountNumber}
+   374→  \u2022 Amount Claimed: ${amount}
+   375→
+   376→I am hereby directing you to:
+   377→
+   378→${prohibitionList}
+   379→
+   380→Please be advised that any further communication from you in violation of this request may constitute a violation of the FDCPA and may subject you to statutory damages, actual damages, and attorney's fees under 15 U.S.C. \u00a7 1692k.
+   381→
+   382→Please send all written correspondence regarding this matter to the address listed below.
+   383→
+   384→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   385→
+   386→  return buildLetter({
+   387→    recipientName: collectorName,
+   388→    recipientAddress: collectorAddress,
+   389→    subject: `FDCPA \u00a7 805(c) Cease and Desist \u2014 Account ${accountNumber}`,
+   390→    body,
+   391→  });
+   392→}
+   393→
+   394→// ---------------------------------------------------------------------------
+   395→// 6. Goodwill Adjustment Request
+   396→// ---------------------------------------------------------------------------
+   397→
+   398→export function generateGoodwillLetter(params: GoodwillParams): string {
+   399→  const {
+   400→    userName, userAddress, userCity, userState, userZip,
+   401→    accountNumber, creditorName, amount, latePaymentDates,
+   402→    explanation, positiveHistoryYears,
+   403→  } = params;
+   404→
+   405→  const datesList = latePaymentDates.map((d) => `  \u2022 ${formatDateLong(d)}`).join('\n');
+   406→
+   407→  const body = `Dear ${creditorName},
+   408→
+   409→I am writing as a valued customer regarding my account referenced below. I am respectfully requesting a goodwill adjustment to remove the late payment notation(s) from my credit report.
+   410→
+   411→Account Information:
+   412→  \u2022 Account Number: ${accountNumber}
+   413→  \u2022 Current Balance: ${amount}
+   414→  ${positiveHistoryYears ? `\u2022 Years of Positive Payment History: ${positiveHistoryYears}` : ''}
+   415→
+   416→Late Payment Date(s):
+   417→${datesList}
+   418→
+   419→${explanation ? `Explanation: I experienced an unexpected financial hardship at the time of the late payment(s). ${explanation} This was an isolated incident and does not reflect my overall commitment to maintaining a positive payment history with your institution.\n\n` : ''}I take full responsibility for the late payment(s) and have since resumed timely payments. I have been a loyal customer and would greatly appreciate your consideration in removing these late payment notations as a gesture of goodwill.
+   420→
+   421→While I understand you are not legally obligated to make this adjustment, I am hopeful that you will review my overall positive account history and grant this request. Removing these late payments would significantly improve my credit standing and would reinforce my loyalty to your company.
+   422→
+   423→Please send your response to the address listed below.
+   424→
+   425→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   426→
+   427→  return buildLetter({
+   428→    recipientName: creditorName,
+   429→    subject: `Goodwill Adjustment Request \u2014 Account ${accountNumber}`,
+   430→    body,
+   431→  });
+   432→}
+   433→
+   434→// ---------------------------------------------------------------------------
+   435→// 7. Pay-for-Delete Negotiation
+   436→// ---------------------------------------------------------------------------
+   437→
+   438→export function generatePayForDelete(params: PayForDeleteParams): string {
+   439→  const {
+   440→    userName, userAddress, userCity, userState, userZip,
+   441→    accountNumber, creditorName, amount, settlementAmount,
+   442→    settlementPercentage, responseDeadline,
+   443→  } = params;
+   444→
+   445→  const deadline = responseDeadline ? formatDateLong(responseDeadline) : 'thirty (30) days of receipt';
+   446→
+   447→  const body = `Dear ${creditorName},
+   448→
+   449→I am writing to propose a settlement offer for the account referenced below. I am willing to pay a lump sum in exchange for the complete removal of this account from all consumer credit reporting agencies.
+   450→
+   451→Account Information:
+   452→  \u2022 Account Number: ${accountNumber}
+   453→  \u2022 Original Amount: ${amount}
+   454→  \u2022 Proposed Settlement Amount: ${settlementAmount}
+   455→  ${settlementPercentage ? `\u2022 Settlement Percentage: ${settlementPercentage} of the original balance` : ''}
+   456→
+   457→Terms of the Offer:
+   458→
+   459→1. Upon receipt of the settlement amount of ${settlementAmount}, you agree to delete or request the deletion of this account from my credit reports maintained by Equifax, Experian, TransUnion, and any other consumer reporting agency to which this account was reported.
+   460→
+   461→2. You agree to notify all consumer reporting agencies that the account should be completely removed, not merely marked as "paid" or "settled."
+   462→
+   463→3. You agree to provide me with written confirmation that the deletion has been requested, including the name of each consumer reporting agency contacted.
+   464→
+   465→4. This offer is contingent upon your written acceptance returned to me within ${deadline}.
+   466→
+   467→5. Upon receipt of your written acceptance, I will send payment via certified check or money order within fifteen (15) business days.
+   468→
+   469→Please be advised that this offer is being made in good faith. I am under no legal obligation to pay any amount beyond what is being offered, and the statute of limitations on this debt may impact your ability to collect. This settlement represents a mutually beneficial resolution.
+   470→
+   471→Please send your written acceptance or counter-offer to the address listed below.
+   472→
+   473→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   474→
+   475→  return buildLetter({
+   476→    recipientName: creditorName,
+   477→    subject: `Pay-for-Delete Settlement Offer \u2014 Account ${accountNumber}`,
+   478→    body,
+   479→  });
+   480→}
+   481→
+   482→// ---------------------------------------------------------------------------
+   483→// 8. FCRA \u00a7 605B — Identity Theft Dispute
+   484→// ---------------------------------------------------------------------------
+   485→
+   486→export function generateIdentityTheftDispute(params: IdentityTheftParams): string {
+   487→  const {
+   488→    userName, userAddress, userCity, userState, userZip,
+   489→    accountNumber, creditorName, amount,
+   490→    ftcReportNumber, policeReportNumber, discoveryDate,
+   491→    blockScope, disputedItems,
+   492→  } = params;
+   493→
+   494→  const isFullBlock = blockScope === 'full';
+   495→  const itemList = disputedItems?.map((item, i) => `${i + 1}. ${item}`).join('\n') ?? '  \u2022 Account Number: ' + accountNumber;
+   496→
+   497→  const body = `Dear ${creditorName},
+   498→
+   499→I am a victim of identity theft and am writing to dispute the following information that appears on my consumer credit report as a result of fraudulent activity. Pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681c-2 (Section 605B), I hereby request that you block the reporting of this fraudulent information.
+   500→
+   501→Identity Theft Report Information:
+   502→  \u2022 FTC Identity Theft Report Number: ${ftcReportNumber}
+   503→  ${policeReportNumber ? `\u2022 Police Report Number: ${policeReportNumber}` : ''}
+   504→  \u2022 Date Identity Theft Discovered: ${formatDateLong(discoveryDate)}
+   505→
+   506→Under FCRA \u00a7 605B(a)(1), a consumer reporting agency shall block the reporting of any information in the file of a consumer that the consumer identifies as resulting from identity theft, not later than four (4) business days after the date of receipt of the following information from the consumer:
+   507→
+   508→  1. The identity of the consumer;
+   509→  2. A copy of an identity theft report;
+   510→  3. The identification of the information in the consumer's file that is the result of identity theft;
+   511→  4. A statement by the consumer that the information is not the result of any transaction by the consumer.
+   512→
+   513→${isFullBlock ? 'I am requesting a FULL BLOCK of all information in my credit file that is the result of identity theft.' : `The following specific items are the result of identity theft:\n\n${itemList}`}
+   514→
+   515→Account Information:
+   516→  \u2022 Account Number: ${accountNumber}
+   517→  \u2022 Amount: ${amount}
+   518→  \u2022 Creditor: ${creditorName}
+   519→
+   520→I certify under penalty of perjury that the information identified above is not the result of any transaction by me and is the result of identity theft.
+   521→
+   522→Please block the reporting of this information within four (4) business days, as required by 15 U.S.C. \u00a7 1681c-2(a)(1), and provide me with written confirmation of the block.
+   523→
+   524→Please send all correspondence to the address listed below.
+   525→
+   526→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   527→
+   528→  return buildLetter({
+   529→    recipientName: creditorName,
+   530→    subject: `FCRA \u00a7 605B Identity Theft Block Request \u2014 ${userName}`,
+   531→    body,
+   532→  });
+   533→}
+   534→
+   535→// ---------------------------------------------------------------------------
+   536→// 9. Medical Debt CFPB 2023 Rules Dispute
+   537→// ---------------------------------------------------------------------------
+   538→
+   539→const MEDICAL_DISPUTE_REASONS: Record<string, string> = {
+   540→  paid_by_insurance: 'The medical debt was paid by my insurance company and should not be reported as an outstanding balance.',
+   541→  not_my_debt: 'I do not recognize this medical debt and believe it is the result of fraud, mistaken identity, or a billing error.',
+   542→  billing_error: 'There is a billing error associated with this account, and the amount reported is inaccurate.',
+   543→  already_paid: 'This medical debt has already been paid in full and should not appear as an outstanding balance on my credit report.',
+   544→  under_review: 'This medical debt is currently under review by my insurance company and the balance is disputed.',
+   545→};
+   546→
+   547→export function generateMedicalDebtDispute(params: MedicalDebtParams): string {
+   548→  const {
+   549→    userName, userAddress, userCity, userState, userZip,
+   550→    accountNumber, creditorName, amount,
+   551→    medicalProvider, dateOfService, insuranceCompany,
+   552→    claimNumber, disputeReason, disputedItems,
+   553→  } = params;
+   554→
+   555→  const reasonText = MEDICAL_DISPUTE_REASONS[disputeReason] ?? 'This medical debt is being disputed.';
+   556→  const itemList = disputedItems?.map((item, i) => `${i + 1}. ${item}`).join('\n') ?? '';
+   557→
+   558→  const body = `Dear ${creditorName},
+   559→
+   560→I am writing to dispute the reporting of medical debt information on my consumer credit report. Pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681i(a)(1) (Section 611), and consistent with the CFPB's 2023 Final Rules on Medical Debt Collection (88 FR 39820), I hereby dispute the accuracy of the following medical debt information.
+   561→
+   562→${reasonText}
+   563→
+   564→Account Information:
+   565→  \u2022 Account Number: ${accountNumber}
+   566→  \u2022 Amount in Dispute: ${amount}
+   567→  ${medicalProvider ? `\u2022 Medical Provider: ${medicalProvider}` : ''}
+   568→  ${dateOfService ? `\u2022 Date of Service: ${formatDateLong(dateOfService)}` : ''}
+   569→  ${insuranceCompany ? `\u2022 Insurance Company: ${insuranceCompany}` : ''}
+   570→  ${claimNumber ? `\u2022 Insurance Claim Number: ${claimNumber}` : ''}
+   571→
+   572→Under the CFPB's 2023 Final Rules:
+   573→
+   574→  \u2022 Medical debt in collections under $500 is prohibited from being included in consumer credit reports;
+   575→  \u2022 Medical debts that have been paid by insurance must be removed from credit reports;
+   576→  \u2022 Furnishers have an obligation to ensure medical debt information is accurate and complete before reporting.
+   577→
+   578→${itemList ? `The following specific items are disputed:\n\n${itemList}\n\n` : ''}I am requesting that you:
+   579→
+   580→  1. Conduct a reasonable reinvestigation within thirty (30) days of receipt of this letter;
+   581→  2. Delete or correct the disputed medical debt information if it is found to be inaccurate, incomplete, or covered by the CFPB's 2023 medical debt reporting rules;
+   582→  3. Provide me with written results of your investigation and a corrected copy of my credit report.
+   583→
+   584→Please send all correspondence to the address listed below.
+   585→
+   586→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   587→
+   588→  return buildLetter({
+   589→    recipientName: creditorName,
+   590→    subject: `Medical Debt Dispute (CFPB 2023 Rules) \u2014 Account ${accountNumber}`,
+   591→    body,
+   592→  });
+   593→}
+   594→
+   595→// ---------------------------------------------------------------------------
+   596→// 10. Duplicate Reporting Dispute
+   597→// ---------------------------------------------------------------------------
+   598→
+   599→export function generateDuplicateReportingDispute(params: DuplicateReportingParams): string {
+   600→  const {
+   601→    userName, userAddress, userCity, userState, userZip,
+   602→    accountNumber, creditorName, amount,
+   603→    duplicateAccountNumbers, bureauName, bureauAddress,
+   604→  } = params;
+   605→
+   606→  const dupList = duplicateAccountNumbers.map((acct, i) => `  ${i + 1}. Account Number: ${acct}`).join('\n');
+   607→
+   608→  const body = `Dear ${bureauName},
+   609→
+   610→I am writing to dispute the presence of duplicate account listings on my consumer credit report. Pursuant to the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681i(a)(1) (Section 611), I hereby request that you investigate and remove the duplicate entries.
+   611→
+   612→The following accounts appear to be duplicate listings for the same obligation:
+   613→
+   614→${dupList}
+   615→
+   616→Original Account Information:
+   617→  \u2022 Account Number: ${accountNumber}
+   618→  \u2022 Creditor: ${creditorName}
+   619→  \u2022 Amount: ${amount}
+   620→
+   621→Under FCRA \u00a7 611(a)(1), consumer reporting agencies are required to conduct a reasonable reinvestigation of any disputed information. The presence of duplicate account listings constitutes an inaccurately reported consumer file, as it inflates the number of accounts and may negatively impact my credit score.
+   622→
+   623→I am requesting that you:
+   624→
+   625→  1. Conduct a reasonable reinvestigation within thirty (30) days of receipt of this letter;
+   626→  2. Consolidate or remove the duplicate account listing(s), retaining only one accurate entry;
+   627→  3. Provide me with a corrected copy of my credit report upon completion of the reinvestigation.
+   628→
+   629→Please send all correspondence to the address listed below.
+   630→
+   631→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   632→
+   633→  return buildLetter({
+   634→    recipientName: bureauName,
+   635→    recipientAddress: bureauAddress,
+   636→    subject: `Duplicate Reporting Dispute \u2014 ${creditorName} Account ${accountNumber}`,
+   637→    body,
+   638→  });
+   639→}
+   640→
+   641→// ---------------------------------------------------------------------------
+   642→// 11. Counter to Frivolous Dispute Rejection
+   643→// ---------------------------------------------------------------------------
+   644→
+   645→export function generateFrivolousDisputeCounter(params: FrivolousCounterParams): string {
+   646→  const {
+   647→    userName, userAddress, userCity, userState, userZip,
+   648→    accountNumber, creditorName, amount,
+   649→    bureauName, bureauAddress, frivolousDeterminationDate,
+   650→    bureauReferenceNumber, additionalDocumentation,
+   651→    previousDisputeDates,
+   652→  } = params;
+   653→
+   654→  const prevDates = previousDisputeDates.map((d) => `  \u2022 ${formatDateLong(d)}`).join('\n');
+   655→  const docsList = additionalDocumentation.map((doc, i) => `${i + 1}. ${doc}`).join('\n');
+   656→
+   657→  const body = `Dear ${bureauName},
+   658→
+   659→I am writing in response to your determination dated ${formatDateLong(frivolousDeterminationDate)} that my previous dispute(s) were frivolous or irrelevant. I strenuously object to this determination and am providing additional information and documentation to support the validity of my dispute.
+   660→
+   661→${bureauReferenceNumber ? `Bureau Reference Number: ${bureauReferenceNumber}\n\n` : ''}Previous Dispute Date(s):
+   662→${prevDates}
+   663→
+   664→Account Information:
+   665→  \u2022 Account Number: ${accountNumber}
+   666→  \u2022 Creditor: ${creditorName}
+   667→  \u2022 Amount: ${amount}
+   668→
+   669→Under FCRA \u00a7 611(a)(3), a consumer reporting agency may terminate a reinvestigation if it reasonably determines that the dispute is frivolous or irrelevant. However, the FCRA requires that the agency must notify the consumer of such determination, including the specific reasons for the finding, and must provide the consumer with an opportunity to submit additional relevant information.
+   670→
+   671→I am now submitting the following additional documentation and information to demonstrate that this dispute is neither frivolous nor irrelevant:
+   672→
+   673→${docsList}
+   674→
+   675→I am requesting that you:
+   676→
+   677→  1. Reopen the reinvestigation within five (5) business days of receipt of this letter;
+   678→  2. Conduct a thorough and reasonable reinvestigation of the disputed items;
+   679→  3. Delete or correct the disputed information if it is found to be inaccurate, incomplete, or unverifiable;
+   680→  4. Provide me with written results of your reinvestigation and a corrected copy of my credit report.
+   681→
+   682→Please be advised that a failure to conduct a proper reinvestigation may constitute a violation of the FCRA, 15 U.S.C. \u00a7 1681i, and may subject your organization to liability for damages and attorney's fees.
+   683→
+   684→Please send all correspondence to the address listed below.
+   685→
+   686→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   687→
+   688→  return buildLetter({
+   689→    recipientName: bureauName,
+   690→    recipientAddress: bureauAddress,
+   691→    subject: `Response to Frivolous Dispute Determination \u2014 ${creditorName} Account ${accountNumber}`,
+   692→    body,
+   693→  });
+   694→}
+   695→
+   696→// ---------------------------------------------------------------------------
+   697→// 12. Authorized User Removal Request
+   698→// ---------------------------------------------------------------------------
+   699→
+   700→const AU_REMOVAL_REASONS: Record<string, string> = {
+   701→  never_authorized: 'I never authorized the addition of myself as an authorized user on this account.',
+   702→  divorce_separation: 'I am going through a divorce/separation and need to be removed as an authorized user.',
+   703→  no_longer_relationship: 'I am no longer in a relationship with the primary cardholder and request removal.',
+   704→  account_negative: 'The account has developed negative information that is adversely affecting my credit.',
+   705→};
+   706→
+   707→export function generateAuthorizedUserRemoval(params: AuthorizedUserParams): string {
+   708→  const {
+   709→    userName, userAddress, userCity, userState, userZip,
+   710→    accountNumber, creditorName, primaryCardholderName,
+   711→    dateAdded, removalReason, bureauName,
+   712→  } = params;
+   713→
+   714→  const reasonText = AU_REMOVAL_REASONS[removalReason] ?? 'I am requesting removal as an authorized user on this account.';
+   715→
+   716→  const body = `Dear ${creditorName},
+   717→
+   718→I am writing to request the immediate removal of my name as an authorized user on the following credit card account.
+   719→
+   720→Account Information:
+   721→  \u2022 Account Number: ${accountNumber}
+   722→  \u2022 Primary Cardholder: ${primaryCardholderName}
+   723→  ${dateAdded ? `\u2022 Date Added as Authorized User: ${formatDateLong(dateAdded)}` : ''}
+   724→
+   725→Reason for Removal Request: ${reasonText}
+   726→
+   727→Under the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681i, and your own policies regarding authorized user accounts, I am entitled to have my name removed from this account. As an authorized user, I am not the primary obligor on this account and should not be held responsible for any balance or negative information associated with it.
+   728→
+   729→${bureauName ? `I am also requesting that you notify ${bureauName} and all other consumer reporting agencies to remove this account from my credit report.\n\n` : ''}I am requesting that you:
+   730→
+   731→  1. Remove my name as an authorized user from this account within ten (10) business days of receipt of this letter;
+   732→  2. Notify all consumer reporting agencies that I am no longer an authorized user on this account;
+   733→  3. Ensure that no further activity on this account is reported in connection with my name;
+   734→  4. Provide me with written confirmation that my name has been removed.
+   735→
+   736→Please send all correspondence to the address listed below.
+   737→
+   738→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   739→
+   740→  return buildLetter({
+   741→    recipientName: creditorName,
+   742→    subject: `Authorized User Removal Request \u2014 Account ${accountNumber}`,
+   743→    body,
+   744→  });
+   745→}
+   746→
+   747→// ---------------------------------------------------------------------------
+   748→// 13. CFPB Complaint Template
+   749→// ---------------------------------------------------------------------------
+   750→
+   751→export function generateCfpbComplaint(params: CfpbComplaintParams): string {
+   752→  const {
+   753→    userName, userAddress, userCity, userState, userZip,
+   754→    accountNumber, companyName, companyAddress,
+   755→    product, subProduct, issue, desiredResolution,
+   756→    previousAttempts, previousAttemptDates,
+   757→  } = params;
+   758→
+   759→  const prevDates = previousAttemptDates?.map((d) => `  \u2022 ${formatDateLong(d)}`).join('\n') ?? '';
+   760→
+   761→  const body = `To: Consumer Financial Protection Bureau
+   762→Subject: Consumer Complaint Against ${companyName}
+   763→
+   764→I am filing this complaint against ${companyName} regarding their conduct related to ${product}${subProduct ? ` (${subProduct})` : ''}. I have attempted to resolve this matter directly with the company but have been unsuccessful.
+   765→
+   766→Company Information:
+   767→  \u2022 Company Name: ${companyName}
+   768→  ${companyAddress ? `\u2022 Company Address: ${companyAddress}` : ''}
+   769→  \u2022 Account Number: ${accountNumber}
+   770→
+   771→Description of the Issue:
+   772→${issue}
+   773→
+   774→${previousAttempts ? `Previous Resolution Attempts:\n${previousAttempts}\n\n` : ''}${prevDates ? `Dates of Previous Attempts:${prevDates}\n\n` : ''}Desired Resolution:
+   775→${desiredResolution}
+   776→
+   777→I believe that ${companyName} has violated the following consumer protection laws:
+   778→
+   779→  \u2022 Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681 et seq.
+   780→  \u2022 Fair Debt Collection Practices Act (FDCPA), 15 U.S.C. \u00a7 1692 et seq.
+   781→  \u2022 Consumer Financial Protection Act of 2010, 12 U.S.C. \u00a7 5301 et seq.
+   782→
+   783→I respectfully request that the CFPB investigate this matter and take appropriate action to ensure compliance with federal consumer protection laws.
+   784→
+   785→Complainant Information:
+   786→
+   787→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   788→
+   789→  return buildLetter({
+   790→    recipientName: 'Consumer Financial Protection Bureau',
+   791→    recipientAddress: '1700 G Street NW, Washington, DC 20552',
+   792→    subject: `Consumer Complaint Against ${companyName} \u2014 ${product}`,
+   793→    body,
+   794→  });
+   795→}
+   796→
+   797→// ---------------------------------------------------------------------------
+   798→// 14. Escalation Letter
+   799→// ---------------------------------------------------------------------------
+   800→
+   801→export function generateEscalationLetter(params: EscalationParams): string {
+   802→  const {
+   803→    userName, userAddress, userCity, userState, userZip,
+   804→    accountNumber, companyName, companyAddress,
+   805→    executiveName, executiveTitle,
+   806→    previousCorrespondenceDates, previousReferenceNumbers,
+   807→    unresolvedIssues, desiredResolution, responseDeadline,
+   808→  } = params;
+   809→
+   810→  const prevDates = previousCorrespondenceDates.map((d) => `  \u2022 ${formatDateLong(d)}`).join('\n');
+   811→  const refNums = previousReferenceNumbers?.map((r) => `  \u2022 Reference: ${r}`).join('\n') ?? '';
+   812→  const issueList = unresolvedIssues.map((issue, i) => `${i + 1}. ${issue}`).join('\n');
+   813→  const deadline = responseDeadline ? formatDateLong(responseDeadline) : 'fifteen (15) business days of receipt';
+   814→
+   815→  const body = `Dear ${executiveName ? `${executiveTitle ?? 'Executive'} ${executiveName}` : 'Executive Customer Relations'},
+   816→
+   817→I am writing to escalate an unresolved matter to your attention after multiple attempts to resolve it through standard customer service channels. I am deeply concerned about the lack of resolution and the ongoing impact on my credit standing.
+   818→
+   819→${previousReferenceNumbers ? `Previous Reference Numbers:\n${refNums}\n\n` : ''}Previous Correspondence Date(s):
+   820→${prevDates}
+   821→
+   822→Company Information:
+   823→  \u2022 Company: ${companyName}
+   824→  \u2022 Account Number: ${accountNumber}
+   825→
+   826→The following issues remain unresolved:
+   827→
+   828→${issueList}
+   829→
+   830→Despite my previous attempts to resolve this matter in good faith, ${companyName} has failed to take appropriate corrective action. This failure may constitute a violation of the Fair Credit Reporting Act (FCRA), 15 U.S.C. \u00a7 1681 et seq., and other applicable federal and state consumer protection laws.
+   831→
+   832→I am requesting the following resolution:
+   833→
+   834→${desiredResolution}
+   835→
+   836→Please investigate this matter and provide a written response within ${deadline}. If this matter is not resolved to my satisfaction, I reserve the right to:
+   837→
+   838→  1. File a formal complaint with the Consumer Financial Protection Bureau (CFPB);
+   839→  2. File a complaint with my state Attorney General's office;
+   840→  3. Pursue all available legal remedies, including damages under the FCRA and FDCPA.
+   841→
+   842→I would prefer to resolve this matter amicably and without the need for further escalation. I look forward to your prompt response.
+   843→
+   844→Please send all correspondence to the address listed below.
+   845→
+   846→${signatureBlock(userName, userAddress, userCity, userState, userZip)}`;
+   847→
+   848→  return buildLetter({
+   849→    recipientName: executiveName ? `${executiveTitle ?? ''} ${executiveName}`.trim() : 'Executive Customer Relations',
+   850→    recipientAddress: companyAddress,
+   851→    subject: `Escalation: Unresolved Dispute \u2014 Account ${accountNumber}`,
+   852→    body,
+   853→  });
+   854→}
+   855→
+   856→// ---------------------------------------------------------------------------
+   857→// Template Catalog
+   858→// ---------------------------------------------------------------------------
+   859→
+   860→export const TEMPLATE_CATALOG: TemplateCatalogEntry[] = [
+   861→  {
+   862→    id: 'fcra-609',
+   863→    name: 'FCRA \u00a7 609 Request for File Disclosure',
+   864→    description: 'Request a complete copy of your consumer credit file from a credit bureau under FCRA \u00a7 609(a)(1).',
+   865→    legalBasis: '15 U.S.C. \u00a7 1681g(a)(1)',
+   866→    templateFn: (p) => generate609Letter(p as unknown as BureauDisputeParams),
+   867→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'bureauName', 'bureauAddress'],
+   868→  },
+   869→  {
+   870→    id: 'fcra-611',
+   871→    name: 'FCRA \u00a7 611 Dispute to Credit Bureaus',
+   872→    description: 'Dispute inaccurate, incomplete, or unverifiable information on your credit report with a credit bureau.',
+   873→    legalBasis: '15 U.S.C. \u00a7 1681i(a)(1)',
+   874→    templateFn: (p) => generate611Letter(p as unknown as BureauDisputeParams),
+   875→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'bureauName', 'bureauAddress', 'disputedItems'],
+   876→  },
+   877→  {
+   878→    id: 'fcra-623',
+   879→    name: 'FCRA \u00a7 623 Dispute to Furnishers',
+   880→    description: 'Direct dispute with a furnisher of credit information under FCRA \u00a7 623 and Regulation V.',
+   881→    legalBasis: '15 U.S.C. \u00a7 1681s-2(a)(3); 12 C.F.R. \u00a7 1022.43',
+   882→    templateFn: (p) => generate623Letter(p as unknown as FurnisherDisputeParams),
+   883→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'date'],
+   884→  },
+   885→  {
+   886→    id: 'fdcpa-809',
+   887→    name: 'FDCPA \u00a7 809 Debt Validation Request',
+   888→    description: 'Request validation of a debt from a debt collector within 30 days of initial communication.',
+   889→    legalBasis: '15 U.S.C. \u00a7 1692g',
+   890→    templateFn: (p) => generateFdcpaValidation(p as unknown as DebtValidationParams),
+   891→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'collectorName', 'collectorAddress', 'amount'],
+   892→  },
+   893→  {
+   894→    id: 'fdcpa-805c',
+   895→    name: 'FDCPA \u00a7 805(c) Cease and Desist',
+   896→    description: 'Direct a debt collector to immediately cease all communication regarding a debt.',
+   897→    legalBasis: '15 U.S.C. \u00a7 1692c(c)',
+   898→    templateFn: (p) => generateCeaseDesist(p as unknown as CeaseDesistParams),
+   899→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'collectorName', 'collectorAddress', 'amount'],
+   900→  },
+   901→  {
+   902→    id: 'goodwill',
+   903→    name: 'Goodwill Adjustment Request',
+   904→    description: 'Request a creditor to remove late payment notations as a goodwill gesture.',
+   905→    legalBasis: 'No statutory basis; voluntary creditor adjustment',
+   906→    templateFn: (p) => generateGoodwillLetter(p as unknown as GoodwillParams),
+   907→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'latePaymentDates'],
+   908→  },
+   909→  {
+   910→    id: 'pay-for-delete',
+   911→    name: 'Pay-for-Delete Negotiation',
+   912→    description: 'Offer a lump-sum settlement in exchange for complete deletion of the account from credit reports.',
+   913→    legalBasis: 'No statutory basis; contractual negotiation',
+   914→    templateFn: (p) => generatePayForDelete(p as unknown as PayForDeleteParams),
+   915→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'settlementAmount'],
+   916→  },
+   917→  {
+   918→    id: 'identity-theft-605b',
+   919→    name: 'FCRA \u00a7 605B Identity Theft Dispute',
+   920→    description: 'Request a block on fraudulent information resulting from identity theft under FCRA \u00a7 605B.',
+   921→    legalBasis: '15 U.S.C. \u00a7 1681c-2',
+   922→    templateFn: (p) => generateIdentityTheftDispute(p as unknown as IdentityTheftParams),
+   923→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'ftcReportNumber', 'discoveryDate', 'blockScope'],
+   924→  },
+   925→  {
+   926→    id: 'medical-debt-cfpb-2023',
+   927→    name: 'Medical Debt Dispute (CFPB 2023 Rules)',
+   928→    description: 'Dispute medical debt reporting under FCRA \u00a7 611 and the CFPB\u2019s 2023 medical debt collection rules.',
+   929→    legalBasis: '15 U.S.C. \u00a7 1681i(a)(1); 88 FR 39820 (CFPB Final Rule)',
+   930→    templateFn: (p) => generateMedicalDebtDispute(p as unknown as MedicalDebtParams),
+   931→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'disputeReason'],
+   932→  },
+   933→  {
+   934→    id: 'duplicate-reporting',
+   935→    name: 'Duplicate Reporting Dispute',
+   936→    description: 'Dispute duplicate account listings on a credit report that inflate the number of reported accounts.',
+   937→    legalBasis: '15 U.S.C. \u00a7 1681i(a)(1)',
+   938→    templateFn: (p) => generateDuplicateReportingDispute(p as unknown as DuplicateReportingParams),
+   939→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'duplicateAccountNumbers', 'bureauName', 'bureauAddress'],
+   940→  },
+   941→  {
+   942→    id: 'frivolous-counter',
+   943→    name: 'Counter to Frivolous Dispute Rejection',
+   944→    description: 'Respond to a credit bureau\u2019s determination that a dispute was frivolous or irrelevant, providing additional documentation.',
+   945→    legalBasis: '15 U.S.C. \u00a7 1681i(a)(3)',
+   946→    templateFn: (p) => generateFrivolousDisputeCounter(p as unknown as FrivolousCounterParams),
+   947→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'amount', 'bureauName', 'bureauAddress', 'frivolousDeterminationDate', 'additionalDocumentation', 'previousDisputeDates'],
+   948→  },
+   949→  {
+   950→    id: 'authorized-user-removal',
+   951→    name: 'Authorized User Removal Request',
+   952→    description: 'Request removal as an authorized user from a credit card account.',
+   953→    legalBasis: '15 U.S.C. \u00a7 1681i; creditor policies',
+   954→    templateFn: (p) => generateAuthorizedUserRemoval(p as unknown as AuthorizedUserParams),
+   955→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'creditorName', 'primaryCardholderName', 'removalReason'],
+   956→  },
+   957→  {
+   958→    id: 'cfpb-complaint',
+   959→    name: 'CFPB Complaint',
+   960→    description: 'File a formal consumer complaint with the Consumer Financial Protection Bureau.',
+   961→    legalBasis: 'Consumer Financial Protection Act of 2010, 12 U.S.C. \u00a7 5301 et seq.',
+   962→    templateFn: (p) => generateCfpbComplaint(p as unknown as CfpbComplaintParams),
+   963→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'companyName', 'product', 'issue', 'desiredResolution'],
+   964→  },
+   965→  {
+   966→    id: 'escalation',
+   967→    name: 'Escalation Letter',
+   968→    description: 'Escalate an unresolved dispute to executive-level management with threats of regulatory action.',
+   969→    legalBasis: '15 U.S.C. \u00a7 1681 et seq.; 15 U.S.C. \u00a7 1692 et seq.',
+   970→    templateFn: (p) => generateEscalationLetter(p as unknown as EscalationParams),
+   971→    requiredFields: ['userName', 'userAddress', 'userCity', 'userState', 'userZip', 'accountNumber', 'companyName', 'companyAddress', 'previousCorrespondenceDates', 'unresolvedIssues', 'desiredResolution'],
+   972→  },
+   973→];
+   974→

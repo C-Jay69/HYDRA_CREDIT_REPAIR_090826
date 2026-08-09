@@ -1,0 +1,698 @@
+     1→'use client';
+     2→
+     3→import { useCallback, useEffect, useMemo, useState } from 'react';
+     4→import {
+     5→  Clock,
+     6→  CalendarClock,
+     7→  CheckCircle2,
+     8→  AlertTriangle,
+     9→  Inbox,
+    10→  List,
+    11→  GitBranch,
+    12→  Check,
+    13→} from 'lucide-react';
+    14→import { toast } from 'sonner';
+    15→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+    16→import { Badge } from '@/components/ui/badge';
+    17→import { Button } from '@/components/ui/button';
+    18→import { Skeleton } from '@/components/ui/skeleton';
+    19→import {
+    20→  Table,
+    21→  TableBody,
+    22→  TableCell,
+    23→  TableHead,
+    24→  TableHeader,
+    25→  TableRow,
+    26→} from '@/components/ui/table';
+    27→import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+    28→import { useAppStore } from '@/store/app-store';
+    29→import { cn } from '@/lib/utils';
+    30→
+    31→// ---------------------------------------------------------------------------
+    32→// Types
+    33→// ---------------------------------------------------------------------------
+    34→
+    35→interface DeadlineDispute {
+    36→  id: string;
+    37→  disputeType: string;
+    38→  status: string;
+    39→  targetName: string | null;
+    40→  reportItem?: {
+    41→    accountName: string | null;
+    42→    creditorName: string | null;
+    43→  } | null;
+    44→}
+    45→
+    46→interface Deadline {
+    47→  id: string;
+    48→  title: string;
+    49→  deadlineType: string;
+    50→  dueDate: string;
+    51→  isCompleted: boolean;
+    52→  completedDate: string | null;
+    53→  dispute: DeadlineDispute;
+    54→}
+    55→
+    56→// ---------------------------------------------------------------------------
+    57→// Helpers
+    58→// ---------------------------------------------------------------------------
+    59→
+    60→function daysUntil(dueDate: string): number {
+    61→  const now = new Date();
+    62→  now.setHours(0, 0, 0, 0);
+    63→  const due = new Date(dueDate);
+    64→  due.setHours(0, 0, 0, 0);
+    65→  const diff = due.getTime() - now.getTime();
+    66→  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    67→}
+    68→
+    69→function formatCountdown(days: number): string {
+    70→  if (days < 0) return `${Math.abs(days)} days overdue`;
+    71→  if (days === 0) return 'Due today';
+    72→  return `${days} day${days !== 1 ? 's' } remaining`;
+    73→}
+    74→
+    75→function formatDate(dateStr: string): string {
+    76→  const d = new Date(dateStr);
+    77→  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    78→}
+    79→
+    80→function formatShortDate(dateStr: string): string {
+    81→  const d = new Date(dateStr);
+    82→  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    83→}
+    84→
+    85→function deadlineTypeLabel(type: string): string {
+    86→  if (type === '30-day-investigation') return '30-Day Investigation';
+    87→  if (type === '5-day-validation') return '5-Day Validation';
+    88→  if (type === 'sol-expiration') return 'SOL Expiration';
+    89→  return type.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    90→}
+    91→
+    92→function deadlineTypeColor(type: string): string {
+    93→  const t = type.toLowerCase();
+    94→  if (t.includes('30-day') || t.includes('investigation'))
+    95→    return 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800';
+    96→  if (t.includes('5-day') || t.includes('validation'))
+    97→    return 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800';
+    98→  if (t.includes('sol'))
+    99→    return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800';
+   100→  return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800/50 dark:text-slate-300 dark:border-slate-700';
+   101→}
+   102→
+   103→function urgencyColor(days: number): string {
+   104→  if (days < 0) return 'text-red-600 dark:text-red-400';
+   105→  if (days < 7) return 'text-amber-600 dark:text-amber-400';
+   106→  return 'text-emerald-600 dark:text-emerald-400';
+   107→}
+   108→
+   109→function urgencyDotColor(days: number, isCompleted: boolean): string {
+   110→  if (isCompleted) return 'bg-emerald-500';
+   111→  if (days < 0) return 'bg-red-500';
+   112→  if (days < 7) return 'bg-amber-500';
+   113→  return 'bg-blue-500';
+   114→}
+   115→
+   116→function urgencyLineColor(days: number, isCompleted: boolean): string {
+   117→  if (isCompleted) return 'bg-emerald-200 dark:bg-emerald-800';
+   118→  if (days < 0) return 'bg-red-200 dark:bg-red-800';
+   119→  if (days < 7) return 'bg-amber-200 dark:bg-amber-800';
+   120→  return 'bg-slate-200 dark:bg-slate-700';
+   121→}
+   122→
+   123→function daysBadgeColor(days: number): string {
+   124→  if (days < 0) return 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800';
+   125→  if (days === 0) return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800';
+   126→  if (days < 7) return 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800';
+   127→  return 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800';
+   128→}
+   129→
+   130→// ---------------------------------------------------------------------------
+   131→// Summary stat card
+   132→// ---------------------------------------------------------------------------
+   133→
+   134→interface SummaryCardProps {
+   135→  label: string;
+   136→  value: number;
+   137→  icon: React.ElementType;
+   138→  colorClass: string;
+   139→  iconBgClass: string;
+   140→}
+   141→
+   142→function SummaryCard({ label, value, icon: Icon, colorClass, iconBgClass }: SummaryCardProps) {
+   143→  return (
+   144→    <Card>
+   145→      <CardContent className="pt-0">
+   146→        <div className="flex items-center justify-between">
+   147→          <span className="text-sm font-medium text-muted-foreground">{label}</span>
+   148→          <div className={cn('flex size-8 items-center justify-center rounded-lg', iconBgClass)}>
+   149→            <Icon className={cn('size-4', colorClass)} />
+   150→          </div>
+   151→        </div>
+   152→        <p className="mt-2 text-3xl font-bold tracking-tight">{value.toLocaleString()}</p>
+   153→        <p className="mt-0.5 text-xs text-muted-foreground">{label}</p>
+   154→      </CardContent>
+   155→    </Card>
+   156→  );
+   157→}
+   158→
+   159→// ---------------------------------------------------------------------------
+   160→// Summary skeleton
+   161→// ---------------------------------------------------------------------------
+   162→
+   163→function SummarySkeleton() {
+   164→  return (
+   165→    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+   166→      {Array.from({ length: 4 }).map((_, i) => (
+   167→        <Card key={i}>
+   168→          <CardContent className="pt-0">
+   169→            <div className="flex items-center justify-between">
+   170→              <Skeleton className="h-5 w-24" />
+   171→              <Skeleton className="size-8 rounded-lg" />
+   172→            </div>
+   173→            <Skeleton className="mt-2 h-8 w-16" />
+   174→            <Skeleton className="mt-1 h-4 w-20" />
+   175→          </CardContent>
+   176→        </Card>
+   177→      ))}
+   178→    </div>
+   179→  );
+   180→}
+   181→
+   182→// ---------------------------------------------------------------------------
+   183→// Timeline view skeleton
+   184→// ---------------------------------------------------------------------------
+   185→
+   186→function TimelineSkeleton() {
+   187→  return (
+   188→    <Card>
+   189→      <CardContent className="pt-0">
+   190→        <div className="space-y-6 py-4">
+   191→          {Array.from({ length: 5 }).map((_, i) => (
+   192→            <div key={i} className="flex gap-4">
+   193→              <div className="flex flex-col items-center">
+   194→                <Skeleton className="size-4 rounded-full" />
+   195→                <Skeleton className="mt-1 w-0.5 flex-1" />
+   196→              </div>
+   197→              <div className="flex-1 space-y-2">
+   198→                <Skeleton className="h-4 w-48" />
+   199→                <Skeleton className="h-3 w-64" />
+   200→                <Skeleton className="h-3 w-32" />
+   201→              </div>
+   202→            </div>
+   203→          ))}
+   204→        </div>
+   205→      </CardContent>
+   206→    </Card>
+   207→  );
+   208→}
+   209→
+   210→// ---------------------------------------------------------------------------
+   211→// Timeline view
+   212→// ---------------------------------------------------------------------------
+   213→
+   214→function TimelineView({
+   215→  deadlines,
+   216→  onMarkComplete,
+   217→  markingId,
+   218→}: {
+   219→  deadlines: Deadline[];
+   220→  onMarkComplete: (id: string) => void;
+   221→  markingId: string | null;
+   222→}) {
+   223→  if (deadlines.length === 0) {
+   224→    return (
+   225→      <Card>
+   226→        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   227→          <div className="flex size-16 items-center justify-center rounded-full bg-muted">
+   228→            <Inbox className="size-8 text-muted-foreground" />
+   229→          </div>
+   230→          <h3 className="mt-4 text-lg font-semibold">No Deadlines</h3>
+   231→          <p className="mt-1 text-sm text-muted-foreground">
+   232→            Deadlines will appear here once you have active disputes.
+   233→          </p>
+   234→        </CardContent>
+   235→      </Card>
+   236→    );
+   237→  }
+   238→
+   239→  return (
+   240→    <Card>
+   241→      <CardContent className="pt-0">
+   242→        <div className="relative space-y-0 py-4">
+   243→          {deadlines.map((deadline, index) => {
+   244→            const days = daysUntil(deadline.dueDate);
+   245→            const isLast = index === deadlines.length - 1;
+   246→            const accountName = deadline.dispute?.reportItem?.accountName ?? 'Unknown Account';
+   247→            const creditorName = deadline.dispute?.reportItem?.creditorName ?? deadline.dispute?.targetName ?? 'Unknown Creditor';
+   248→
+   249→            return (
+   250→              <div key={deadline.id} className="flex gap-4">
+   251→                {/* Vertical line + dot */}
+   252→                <div className="flex flex-col items-center">
+   253→                  <div
+   254→                    className={cn(
+   255→                      'mt-1.5 size-4 shrink-0 rounded-full border-2 border-white ring-2 dark:border-slate-900',
+   256→                      urgencyDotColor(days, deadline.isCompleted),
+   257→                      deadline.isCompleted ? 'ring-emerald-200 dark:ring-emerald-800' : days < 0 ? 'ring-red-200 dark:ring-red-800' : days < 7 ? 'ring-amber-200 dark:ring-amber-800' : 'ring-blue-200 dark:ring-blue-800'
+   258→                    )}
+   259→                  >
+   260→                    {deadline.isCompleted && (
+   261→                      <Check className="size-2.5 text-white" />
+   262→                    )}
+   263→                  </div>
+   264→                  {!isLast && (
+   265→                    <div className={cn('mt-1 w-0.5 flex-1 min-h-[24px]', urgencyLineColor(days, deadline.isCompleted))} />
+   266→                  )}
+   267→                </div>
+   268→
+   269→                {/* Content */}
+   270→                <div className={cn('flex-1 pb-8', isLast && 'pb-0')}>
+   271→                  {/* Date header */}
+   272→                  <p className="text-xs font-medium text-muted-foreground">
+   273→                    {formatDate(deadline.dueDate)}
+   274→                  </p>
+   275→
+   276→                  {/* Title + type badge */}
+   277→                  <div className="mt-1 flex flex-wrap items-center gap-2">
+   278→                    <h3 className={cn(
+   279→                      'text-sm font-semibold',
+   280→                      deadline.isCompleted && 'line-through text-muted-foreground'
+   281→                    )}>
+   282→                      {deadline.title}
+   283→                    </h3>
+   284→                    <Badge
+   285→                      variant="outline"
+   286→                      className={cn('text-[10px]', deadlineTypeColor(deadline.deadlineType))}
+   287→                    >
+   288→                      {deadlineTypeLabel(deadline.deadlineType)}
+   289→                    </Badge>
+   290→                  </div>
+   291→
+   292→                  {/* Related dispute info */}
+   293→                  <p className="mt-1 text-xs text-muted-foreground">
+   294→                    {accountName}{creditorName !== accountName ? ` · ${creditorName}` : ''}
+   295→                  </p>
+   296→
+   297→                  {/* Countdown */}
+   298→                  <div className="mt-2 flex items-center gap-3">
+   299→                    {deadline.isCompleted ? (
+   300→                      <Badge
+   301→                        variant="outline"
+   302→                        className="bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 text-[11px]"
+   303→                      >
+   304→                        <CheckCircle2 className="mr-1 size-3" />
+   305→                        Completed
+   306→                      </Badge>
+   307→                    ) : (
+   308→                      <>
+   309→                        <Badge
+   310→                          variant="outline"
+   311→                          className={cn('text-[11px]', daysBadgeColor(days))}
+   312→                        >
+   313→                          <Clock className="mr-1 size-3" />
+   314→                          {formatCountdown(days)}
+   315→                        </Badge>
+   316→                        <Button
+   317→                          variant="outline"
+   318→                          size="sm"
+   319→                          className="h-7 text-xs"
+   320→                          disabled={markingId === deadline.id}
+   321→                          onClick={() => onMarkComplete(deadline.id)}
+   322→                        >
+   323→                          {markingId === deadline.id ? (
+   324→                            <span className="flex items-center gap-1">
+   325→                              <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+   326→                              Updating...
+   327→                            </span>
+   328→                          ) : (
+   329→                            <>
+   330→                              <Check className="mr-1 size-3" />
+   331→                              Mark Complete
+   332→                            </>
+   333→                          )}
+   334→                        </Button>
+   335→                      </>
+   336→                    )}
+   337→                  </div>
+   338→                </div>
+   339→              </div>
+   340→            );
+   341→          })}
+   342→        </div>
+   343→      </CardContent>
+   344→    </Card>
+   345→  );
+   346→}
+   347→
+   348→// ---------------------------------------------------------------------------
+   349→// List view (table)
+   350→// ---------------------------------------------------------------------------
+   351→
+   352→function ListView({
+   353→  deadlines,
+   354→  onMarkComplete,
+   355→  markingId,
+   356→  sortDir,
+   357→  onToggleSort,
+   358→}: {
+   359→  deadlines: Deadline[];
+   360→  onMarkComplete: (id: string) => void;
+   361→  markingId: string | null;
+   362→  sortDir: 'asc' | 'desc';
+   363→  onToggleSort: () => void;
+   364→}) {
+   365→  if (deadlines.length === 0) {
+   366→    return (
+   367→      <Card>
+   368→        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   369→          <div className="flex size-16 items-center justify-center rounded-full bg-muted">
+   370→            <Inbox className="size-8 text-muted-foreground" />
+   371→          </div>
+   372→          <h3 className="mt-4 text-lg font-semibold">No Deadlines</h3>
+   373→          <p className="mt-1 text-sm text-muted-foreground">
+   374→            Deadlines will appear here once you have active disputes.
+   375→          </p>
+   376→        </CardContent>
+   377→      </Card>
+   378→    );
+   379→  }
+   380→
+   381→  return (
+   382→    <Card>
+   383→      <CardContent className="pt-0">
+   384→        <div className="overflow-x-auto">
+   385→          <Table>
+   386→            <TableHeader>
+   387→              <TableRow>
+   388→                <TableHead className="min-w-[180px]">Deadline</TableHead>
+   389→                <TableHead className="min-w-[150px]">Type</TableHead>
+   390→                <TableHead className="min-w-[160px]">Dispute</TableHead>
+   391→                <TableHead
+   392→                  className="min-w-[120px] cursor-pointer select-none"
+   393→                  onClick={onToggleSort}
+   394→                >
+   395→                  <span className="flex items-center gap-1">
+   396→                    Due Date
+   397→                    <span className="text-xs text-muted-foreground">
+   398→                      {sortDir === 'asc' ? '↑' : '↓'}
+   399→                    </span>
+   400→                  </span>
+   401→                </TableHead>
+   402→                <TableHead className="min-w-[100px]">Days Left</TableHead>
+   403→                <TableHead className="min-w-[100px]">Status</TableHead>
+   404→                <TableHead className="min-w-[130px] text-right">Action</TableHead>
+   405→              </TableRow>
+   406→            </TableHeader>
+   407→            <TableBody>
+   408→              {deadlines.map((deadline) => {
+   409→                const days = daysUntil(deadline.dueDate);
+   410→                const accountName = deadline.dispute?.reportItem?.accountName ?? 'Unknown Account';
+   411→                const creditorName = deadline.dispute?.reportItem?.creditorName ?? deadline.dispute?.targetName ?? 'Unknown Creditor';
+   412→
+   413→                return (
+   414→                  <TableRow key={deadline.id}>
+   415→                    <TableCell className="font-medium">{deadline.title}</TableCell>
+   416→                    <TableCell>
+   417→                      <Badge
+   418→                        variant="outline"
+   419→                        className={cn('text-[10px]', deadlineTypeColor(deadline.deadlineType))}
+   420→                      >
+   421→                        {deadlineTypeLabel(deadline.deadlineType)}
+   422→                      </Badge>
+   423→                    </TableCell>
+   424→                    <TableCell>
+   425→                      <div>
+   426→                        <p className="text-sm font-medium truncate max-w-[150px]">{accountName}</p>
+   427→                        <p className="text-xs text-muted-foreground truncate max-w-[150px]">{creditorName}</p>
+   428→                      </div>
+   429→                    </TableCell>
+   430→                    <TableCell>
+   431→                      <span className="text-sm">{formatDate(deadline.dueDate)}</span>
+   432→                    </TableCell>
+   433→                    <TableCell>
+   434→                      {deadline.isCompleted ? (
+   435→                        <span className="text-sm text-muted-foreground">—</span>
+   436→                      ) : (
+   437→                        <span className={cn('text-sm font-medium', urgencyColor(days))}>
+   438→                          {formatCountdown(days)}
+   439→                        </span>
+   440→                      )}
+   441→                    </TableCell>
+   442→                    <TableCell>
+   443→                      {deadline.isCompleted ? (
+   444→                        <Badge
+   445→                          variant="outline"
+   446→                          className="bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-800 text-[11px]"
+   447→                        >
+   448→                          <CheckCircle2 className="mr-1 size-3" />
+   449→                          Completed
+   450→                        </Badge>
+   451→                      ) : (
+   452→                        <Badge
+   453→                          variant="outline"
+   454→                          className={cn('text-[11px]', daysBadgeColor(days))}
+   455→                        >
+   456→                          Pending
+   457→                        </Badge>
+   458→                      )}
+   459→                    </TableCell>
+   460→                    <TableCell className="text-right">
+   461→                      {!deadline.isCompleted && (
+   462→                        <Button
+   463→                          variant="outline"
+   464→                          size="sm"
+   465→                          className="h-7 text-xs"
+   466→                          disabled={markingId === deadline.id}
+   467→                          onClick={() => onMarkComplete(deadline.id)}
+   468→                        >
+   469→                          {markingId === deadline.id ? (
+   470→                            <span className="flex items-center gap-1">
+   471→                              <span className="size-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+   472→                              Updating...
+   473→                            </span>
+   474→                          ) : (
+   475→                            <>
+   476→                              <Check className="mr-1 size-3" />
+   477→                              Mark Complete
+   478→                            </>
+   479→                          )}
+   480→                        </Button>
+   481→                      )}
+   482→                    </TableCell>
+   483→                  </TableRow>
+   484→                );
+   485→              })}
+   486→            </TableBody>
+   487→          </Table>
+   488→        </div>
+   489→      </CardContent>
+   490→    </Card>
+   491→  );
+   492→}
+   493→
+   494→// ---------------------------------------------------------------------------
+   495→// Deadlines Page
+   496→// ---------------------------------------------------------------------------
+   497→
+   498→export function DeadlinesPage() {
+   499→  const userId = useAppStore((s) => s.userId);
+   500→
+   501→  const [deadlines, setDeadlines] = useState<Deadline[]>([]);
+   502→  const [loading, setLoading] = useState(true);
+   503→  const [error, setError] = useState<string | null>(null);
+   504→  const [viewMode, setViewMode] = useState<'timeline' | 'list'>('timeline');
+   505→  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
+   506→  const [markingId, setMarkingId] = useState<string | null>(null);
+   507→
+   508→  // Fetch deadlines on mount
+   509→  useEffect(() => {
+   510→    if (!userId) return;
+   511→    let cancelled = false;
+   512→
+   513→    async function fetchDeadlines() {
+   514→      try {
+   515→        setLoading(true);
+   516→        setError(null);
+   517→        const res = await fetch(`/api/deadlines?userId=${encodeURIComponent(userId)}`);
+   518→        if (!res.ok) throw new Error('Failed to fetch deadlines');
+   519→        const json = await res.json();
+   520→        if (!cancelled) {
+   521→          setDeadlines(json.data ?? []);
+   522→        }
+   523→      } catch (err) {
+   524→        if (!cancelled) {
+   525→          setError(err instanceof Error ? err.message : 'An error occurred');
+   526→        }
+   527→      } finally {
+   528→        if (!cancelled) setLoading(false);
+   529→      }
+   530→    }
+   531→
+   532→    fetchDeadlines();
+   533→    return () => { cancelled = true; };
+   534→  }, [userId]);
+   535→
+   536→  // Mark deadline as complete
+   537→  const handleMarkComplete = useCallback(async (id: string) => {
+   538→    setMarkingId(id);
+   539→    try {
+   540→      const res = await fetch('/api/deadlines', {
+   541→        method: 'PUT',
+   542→        headers: { 'Content-Type': 'application/json' },
+   543→        body: JSON.stringify({ id, isCompleted: true }),
+   544→      });
+   545→      if (!res.ok) throw new Error('Failed to update deadline');
+   546→
+   547→      // Update local state optimistically
+   548→      setDeadlines((prev) =>
+   549→        prev.map((d) => (d.id === id ? { ...d, isCompleted: true } : d))
+   550→      );
+   551→
+   552→      toast.success('Deadline marked as complete!');
+   553→    } catch (err) {
+   554→      console.error('Mark complete error:', err);
+   555→      toast.error('Failed to update deadline. Please try again.');
+   556→    } finally {
+   557→      setMarkingId(null);
+   558→    }
+   559→  }, []);
+   560→
+   561→  // Toggle sort direction
+   562→  const handleToggleSort = useCallback(() => {
+   563→    setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+   564→  }, []);
+   565→
+   566→  // Sorted deadlines (by due date)
+   567→  const sortedDeadlines = useMemo(() => {
+   568→    return [...deadlines].sort((a, b) => {
+   569→      const diff = new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+   570→      return sortDir === 'asc' ? diff : -diff;
+   571→    });
+   572→  }, [deadlines, sortDir]);
+   573→
+   574→  // Summary stats
+   575→  const summaryStats = useMemo(() => {
+   576→    const now = new Date();
+   577→    const weekFromNow = new Date(now);
+   578→    weekFromNow.setDate(weekFromNow.getDate() + 7);
+   579→
+   580→    const total = deadlines.length;
+   581→    const overdue = deadlines.filter((d) => !d.isCompleted && daysUntil(d.dueDate) < 0).length;
+   582→    const dueThisWeek = deadlines.filter(
+   583→      (d) => !d.isCompleted && daysUntil(d.dueDate) >= 0 && daysUntil(d.dueDate) <= 7
+   584→    ).length;
+   585→    const completed = deadlines.filter((d) => d.isCompleted).length;
+   586→
+   587→    return { total, overdue, dueThisWeek, completed };
+   588→  }, [deadlines]);
+   589→
+   590→  // ---- Loading state ----
+   591→  if (loading) {
+   592→    return (
+   593→      <div className="space-y-6">
+   594→        <SummarySkeleton />
+   595→        <TimelineSkeleton />
+   596→      </div>
+   597→    );
+   598→  }
+   599→
+   600→  // ---- Error state ----
+   601→  if (error) {
+   602→    return (
+   603→      <Card>
+   604→        <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+   605→          <div className="flex size-16 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/30">
+   606→            <AlertTriangle className="size-8 text-red-600 dark:text-red-400" />
+   607→          </div>
+   608→          <h3 className="mt-4 text-lg font-semibold">Error Loading Deadlines</h3>
+   609→          <p className="mt-1 text-sm text-muted-foreground">{error}</p>
+   610→          <Button variant="outline" className="mt-4" onClick={() => window.location.reload()}>
+   611→            Retry
+   612→          </Button>
+   613→        </CardContent>
+   614→      </Card>
+   615→    );
+   616→  }
+   617→
+   618→  return (
+   619→    <div className="space-y-6">
+   620→      {/* ---- Summary Cards ---- */}
+   621→      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+   622→        <SummaryCard
+   623→          label="Total Deadlines"
+   624→          value={summaryStats.total}
+   625→          icon={CalendarClock}
+   626→          colorClass="text-primary"
+   627→          iconBgClass="bg-primary/10"
+   628→        />
+   629→        <SummaryCard
+   630→          label="Overdue"
+   631→          value={summaryStats.overdue}
+   632→          icon={AlertTriangle}
+   633→          colorClass="text-red-600 dark:text-red-400"
+   634→          iconBgClass="bg-red-100 dark:bg-red-900/30"
+   635→        />
+   636→        <SummaryCard
+   637→          label="Due This Week"
+   638→          value={summaryStats.dueThisWeek}
+   639→          icon={Clock}
+   640→          colorClass="text-amber-600 dark:text-amber-400"
+   641→          iconBgClass="bg-amber-100 dark:bg-amber-900/30"
+   642→        />
+   643→        <SummaryCard
+   644→          label="Completed"
+   645→          value={summaryStats.completed}
+   646→          icon={CheckCircle2}
+   647→          colorClass="text-emerald-600 dark:text-emerald-400"
+   648→          iconBgClass="bg-emerald-100 dark:bg-emerald-900/30"
+   649→        />
+   650→      </div>
+   651→
+   652→      {/* ---- View Toggle ---- */}
+   653→      <div className="flex items-center justify-between">
+   654→        <div className="flex items-center gap-2">
+   655→          <h2 className="text-base font-semibold">All Deadlines</h2>
+   656→          <Badge variant="secondary" className="text-[11px]">
+   657→            {deadlines.length} total
+   658→          </Badge>
+   659→        </div>
+   660→        <ToggleGroup
+   661→          type="single"
+   662→          value={viewMode}
+   663→          onValueChange={(val) => {
+   664→            if (val) setViewMode(val as 'timeline' | 'list');
+   665→          }}
+   666→          variant="outline"
+   667→        >
+   668→          <ToggleGroupItem value="timeline" className="gap-1.5 text-xs">
+   669→            <GitBranch className="size-3.5" />
+   670→            Timeline
+   671→          </ToggleGroupItem>
+   672→          <ToggleGroupItem value="list" className="gap-1.5 text-xs">
+   673→            <List className="size-3.5" />
+   674→            List
+   675→          </ToggleGroupItem>
+   676→        </ToggleGroup>
+   677→      </div>
+   678→
+   679→      {/* ---- View Content ---- */}
+   680→      {viewMode === 'timeline' ? (
+   681→        <TimelineView
+   682→          deadlines={sortedDeadlines}
+   683→          onMarkComplete={handleMarkComplete}
+   684→          markingId={markingId}
+   685→        />
+   686→      ) : (
+   687→        <ListView
+   688→          deadlines={sortedDeadlines}
+   689→          onMarkComplete={handleMarkComplete}
+   690→          markingId={markingId}
+   691→          sortDir={sortDir}
+   692→          onToggleSort={handleToggleSort}
+   693→        />
+   694→      )}
+   695→    </div>
+   696→  );
+   697→}
+   698→
