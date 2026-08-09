@@ -300,7 +300,26 @@ export async function POST(request: NextRequest) {
     });
 
     // 4. Create Dispute and Deadline records for each detected issue
-    const createdDisputes = [];
+    const createdDisputes: Array<{
+      id: string;
+      userId: string;
+      reportItemId: string | null;
+      disputeType: string;
+      strategy: string | null;
+      targetName: string | null;
+      targetAddress: string | null;
+      legalBasis: string | null;
+      reason: string | null;
+      confidence: number | null;
+      status: string;
+      sentDate: Date | null;
+      responseDate: Date | null;
+      deadline: Date | null;
+      outcome: string | null;
+      notes: string | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }> = [];
 
     for (const analyzedItem of analysisItems) {
       if (analyzedItem.issues.length === 0) continue;

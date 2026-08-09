@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   Upload,
   Search,
@@ -70,6 +70,21 @@ interface VaultDocument {
   description: string;
   relatedDisputeId?: string;
   createdAt: string;
+  filePath?: string;
+  fileSize?: number;
+  fileType?: string;
+}
+
+interface CreditReportDocument {
+  id: string;
+  userId: string;
+  reportSource: string;
+  fileName?: string | null;
+  filePath?: string | null;
+  fileSize?: number | null;
+  rawText?: string | null;
+  status: string;
+  createdAt: string;
 }
 
 const CATEGORY_LABELS: Record<DocumentCategory, string> = {
@@ -92,9 +107,10 @@ const CATEGORY_COLORS: Record<DocumentCategory, string> = {
   other: 'bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400',
 };
 
-const FILTER_OPTIONS: { value: DocumentCategory | 'all'; label: string }[] = [
+const FILTER_OPTIONS: { value: DocumentCategory | 'all' | 'credit-report-api'; label: string }[] = [
   { value: 'all', label: 'All' },
   { value: 'credit-report', label: 'Credit Reports' },
+  { value: 'credit-report-api', label: 'Uploaded Reports' },
   { value: 'dispute-letter', label: 'Dispute Letters' },
   { value: 'collection-notice', label: 'Collection Notices' },
   { value: 'police-report', label: 'Police Reports' },
@@ -143,10 +159,11 @@ export function VaultPage() {
   const userId = useAppStore((s) => s.userId);
 
   const [documents, setDocuments] = useState<VaultDocument[]>([]);
+  const [creditReports, setCreditReports] = useState<CreditReportDocument[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [activeFilter, setActiveFilter] = useState<DocumentCategory | 'all'>('all');
+  const [activeFilter, setActiveFilter] = useState<DocumentCategory | 'all' | 'credit-report-api'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Upload dialog state
@@ -163,15 +180,24 @@ export function VaultPage() {
   const [deleteTarget, setDeleteTarget] = useState<VaultDocument | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  // Fetch documents
+  // Fetch documents and credit reports
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/documents?userId=${userId}`);
-      if (!res.ok) throw new Error('Failed to fetch documents');
-      const data = await res.json();
-      setDocuments(Array.isArray(data) ? data : data.documents ?? []);
+      const [docsRes, reportsRes] = await Promise.all([
+        fetch(`/api/documents?userId=${userId}`),
+        fetch(`/api/credit-reports?userId=${userId}`),
+      ]);
+
+      if (!docsRes.ok) throw new Error('Failed to fetch documents');
+      if (!reportsRes.ok) throw new Error('Failed to fetch credit reports');
+
+      const docsData = await docsRes.json();
+      const reportsData = await reportsRes.json();
+
+      setDocuments(Array.isArray(docsData) ? docsData : docsData.documents ?? []);
+      setCreditReports(Array.isArray(reportsData) ? reportsData : reportsData.data ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -225,18 +251,63 @@ export function VaultPage() {
     }
   };
 
-  // Filter and search
-  const filteredDocs = documents.filter((doc) => {
-    if (activeFilter !== 'all' && doc.category !== activeFilter) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        doc.fileName.toLowerCase().includes(q) ||
-        doc.description.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+  // Filter and search - combine documents and credit reports
+  const allItems = useMemo(() => {
+    const docItems = documents.map((doc) => ({
+      ...doc,
+      source: 'document' as const,
+      displayCategory: doc.category,
+      displayName: doc.fileName,
+      displayDescription: doc.description,
+      displayDate: doc.createdAt,
+      displayFilePath: doc.filePath,
+      displayFileSize: doc.fileSize,
+      displayFileType: doc.fileType,
+    }));
+
+    const reportItems = creditReports.map((report) => ({
+      id: report.id,
+      userId: report.userId,
+      fileName: report.fileName ?? `Credit Report - ${report.reportSource}`,
+      category: 'credit-report' as DocumentCategory,
+      description: `Credit report from ${report.reportSource}${report.filePath ? ' (PDF uploaded)' : ' (manual entry)'}`,
+      relatedDisputeId: undefined,
+      createdAt: report.createdAt,
+      filePath: report.filePath,
+      fileSize: report.fileSize,
+      fileType: 'pdf',
+      source: 'credit-report' as const,
+      displayCategory: 'credit-report' as DocumentCategory,
+      displayName: report.fileName ?? `Credit Report - ${report.reportSource}`,
+      displayDescription: `Credit report from ${report.reportSource}${report.filePath ? ' (PDF uploaded)' : ' (manual entry)'}`,
+      displayDate: report.createdAt,
+      displayFilePath: report.filePath,
+      displayFileSize: report.fileSize,
+      displayFileType: 'pdf',
+      reportSource: report.reportSource,
+      status: report.status,
+      rawText: report.rawText,
+    }));
+
+    return [...docItems, ...reportItems].sort(
+      (a, b) => new Date(b.displayDate).getTime() - new Date(a.displayDate).getTime()
+    );
+  }, [documents, creditReports]);
+
+  const filteredDocs = useMemo(() => {
+    return allItems.filter((doc) => {
+      if (activeFilter !== 'all' && activeFilter !== 'credit-report-api' && doc.displayCategory !== activeFilter) return false;
+      if (activeFilter === 'credit-report-api' && doc.source !== 'credit-report') return false;
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        return (
+          doc.displayName.toLowerCase().includes(q) ||
+          doc.displayDescription.toLowerCase().includes(q)
+        );
+      }
+      return true;
+    });
+  }, [allItems, activeFilter, searchQuery]);
 
   // -----------------------------------------------------------------------
   // Render
@@ -314,7 +385,7 @@ export function VaultPage() {
       )}
 
       {/* Empty State */}
-      {!loading && !error && documents.length === 0 && (
+      {!loading && !error && allItems.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-16">
             <div className="rounded-full bg-muted p-4">
@@ -335,7 +406,7 @@ export function VaultPage() {
       )}
 
       {/* Filtered Empty State */}
-      {!loading && !error && documents.length > 0 && filteredDocs.length === 0 && (
+      {!loading && !error && allItems.length > 0 && filteredDocs.length === 0 && (
         <Card>
           <CardContent className="flex flex-col items-center gap-2 py-12">
             <Search className="h-8 w-8 text-muted-foreground" />
@@ -351,7 +422,7 @@ export function VaultPage() {
       {!loading && !error && filteredDocs.length > 0 && (
         <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
           {filteredDocs.map((doc) => {
-            const fileType = getFileType(doc.fileName);
+            const fileType = getFileType(doc.displayName);
             return (
               <Card
                 key={doc.id}
@@ -363,39 +434,46 @@ export function VaultPage() {
                     <div className="rounded-lg bg-muted p-2">
                       {getFileIcon(fileType)}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
-                      onClick={() => setDeleteTarget(doc)}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    {doc.source === 'document' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() => setDeleteTarget(doc as VaultDocument)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    )}
                   </div>
 
                   {/* File Name */}
-                  <p className="text-sm font-medium leading-tight" title={doc.fileName}>
-                    {truncate(doc.fileName, 32)}
+                  <p className="text-sm font-medium leading-tight" title={doc.displayName}>
+                    {truncate(doc.displayName, 32)}
                   </p>
 
                   {/* Category Badge */}
                   <Badge
                     variant="secondary"
-                    className={cn('text-xs', CATEGORY_COLORS[doc.category])}
+                    className={cn('text-xs', CATEGORY_COLORS[doc.displayCategory])}
                   >
-                    {CATEGORY_LABELS[doc.category]}
+                    {CATEGORY_LABELS[doc.displayCategory]}
                   </Badge>
 
                   {/* Description */}
-                  {doc.description && (
+                  {doc.displayDescription && (
                     <p className="text-xs text-muted-foreground line-clamp-2">
-                      {truncate(doc.description, 80)}
+                      {truncate(doc.displayDescription, 80)}
                     </p>
                   )}
 
                   {/* Upload Date */}
                   <p className="text-xs text-muted-foreground">
-                    {formatDate(doc.createdAt)}
+                    {formatDate(doc.displayDate)}
+                  </p>
+
+                  {/* Source indicator */}
+                  <p className="text-xs text-muted-foreground">
+                    {doc.source === 'credit-report' ? `Source: ${(doc as any).reportSource}` : 'Manual upload'}
                   </p>
 
                   {/* Related Dispute */}

@@ -928,7 +928,7 @@ export function DisputesPage() {
   const [disputes, setDisputes] = useState<Dispute[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState('all');
+  const [activeTab, setActiveTab] = useState<'all' | 'draft' | 'pending-review' | 'in-progress' | 'resolved' | 'denied'>('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDispute, setSelectedDispute] = useState<Dispute | null>(null);
@@ -1061,7 +1061,7 @@ export function DisputesPage() {
   return (
     <div className="space-y-4">
       {/* ---- Tabs ---- */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'all' | 'draft' | 'pending-review' | 'in-progress' | 'resolved' | 'denied')}>
         <TabsList className="w-full overflow-x-auto">
           {STATUS_TABS.map((tab) => (
             <TabsTrigger key={tab.value} value={tab.value} className="text-xs">
@@ -1069,7 +1069,7 @@ export function DisputesPage() {
               {tab.value !== 'all' && (
                 <span className="ml-1.5 rounded-full bg-muted-foreground/10 px-1.5 py-0.5 text-[10px] font-medium">
                   {disputes.filter(
-                    (d) => tab.value === 'all' || d.status === tab.value
+                    (d) => d.status === tab.value
                   ).length}
                 </span>
               )}

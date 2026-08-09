@@ -267,8 +267,8 @@ function Step1Upload({
   setItems: React.Dispatch<React.SetStateAction<ReportItem[]>>;
   reportSource: string;
   setReportSource: (v: string) => void;
-  uploadedFile: string | null;
-  setUploadedFile: (v: string | null) => void;
+  uploadedFile: File | null;
+  setUploadedFile: (v: File | null) => void;
   onNext: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -303,20 +303,22 @@ function Step1Upload({
     setDragOver(false);
     const files = e.dataTransfer.files;
     if (files.length > 0 && files[0].type === 'application/pdf') {
-      setUploadedFile(files[0].name);
+      setUploadedFile(files[0]);
     }
-  }, []);
+  }, [setUploadedFile]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      setUploadedFile(files[0].name);
+      setUploadedFile(files[0]);
     }
   };
 
   const hasValidItems = items.some(
     (item) => item.accountName.trim().length > 0
   );
+
+  const fileName = uploadedFile?.name ?? null;
 
   return (
     <div className="space-y-6">
@@ -361,12 +363,12 @@ function Step1Upload({
             className="hidden"
             onChange={handleFileSelect}
           />
-          {uploadedFile ? (
+          {fileName ? (
             <>
               <CheckCircle2 className="size-10 text-emerald-500" />
-              <p className="mt-3 text-sm font-medium">{uploadedFile}</p>
+              <p className="mt-3 text-sm font-medium">{fileName}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                PDF received. Now add the accounts from your report below so they can be analyzed.
+                PDF ready for upload. Now add the accounts from your report below so they can be analyzed.
               </p>
             </>
           ) : (
@@ -1203,7 +1205,7 @@ export function UploadPage() {
   // Step 1 state
   const [items, setItems] = useState<ReportItem[]>([]);
   const [reportSource, setReportSource] = useState('');
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
 
   // Step 2 state
   const [jurisdiction, setJurisdiction] = useState('');
@@ -1213,6 +1215,7 @@ export function UploadPage() {
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
 
   // Step 1 -> Step 2
   const handleNext = () => {
@@ -1230,32 +1233,48 @@ export function UploadPage() {
 
     setAnalyzing(true);
     setAnalysisError(null);
+    setUploadProgress(0);
 
     try {
-      // 1. Create the credit report via API
+      // 1. Create the credit report via API with file upload
+      const formData = new FormData();
+      formData.append('userId', userId);
+      formData.append('reportSource', reportSource);
+      formData.append('status', 'uploaded');
+      formData.append('items', JSON.stringify(items.map((item) => ({
+        accountName: item.accountName,
+        accountNumber: item.accountNumber || undefined,
+        creditorName: item.creditorName || undefined,
+        balance: item.balance ? parseFloat(item.balance) : undefined,
+        originalAmount: item.originalAmount ? parseFloat(item.originalAmount) : undefined,
+        dateOpened: item.dateOpened || undefined,
+        dateClosed: item.dateClosed || undefined,
+        dateDelinquent: item.dateDelinquent || undefined,
+        status: item.status,
+        accountType: item.accountType || undefined,
+        isMedical: item.isMedical,
+        isAuthorizedUser: item.isAuthorizedUser,
+      }))));
+
+      if (uploadedFile) {
+        formData.append('file', uploadedFile);
+      }
+
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setUploadProgress((prev) => {
+          if (prev === null || prev >= 90) return prev ?? 90;
+          return prev + 10;
+        });
+      }, 100);
+
       const createRes = await fetch('/api/credit-reports', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          reportSource,
-          status: 'uploaded',
-          items: items.map((item) => ({
-            accountName: item.accountName,
-            accountNumber: item.accountNumber || undefined,
-            creditorName: item.creditorName || undefined,
-            balance: item.balance ? parseFloat(item.balance) : undefined,
-            originalAmount: item.originalAmount ? parseFloat(item.originalAmount) : undefined,
-            dateOpened: item.dateOpened || undefined,
-            dateClosed: item.dateClosed || undefined,
-            dateDelinquent: item.dateDelinquent || undefined,
-            status: item.status,
-            accountType: item.accountType || undefined,
-            isMedical: item.isMedical,
-            isAuthorizedUser: item.isAuthorizedUser,
-          })),
-        }),
+        body: formData,
       });
+
+      clearInterval(progressInterval);
+      setUploadProgress(100);
 
       if (!createRes.ok) {
         throw new Error('Failed to create credit report');
@@ -1289,6 +1308,7 @@ export function UploadPage() {
       );
     } finally {
       setAnalyzing(false);
+      setUploadProgress(null);
     }
   };
 
@@ -1315,6 +1335,16 @@ export function UploadPage() {
       <div className="flex items-center justify-center py-4">
         <ProgressStepper currentStep={step} />
       </div>
+
+      {/* Upload Progress Bar */}
+      {uploadProgress !== null && (
+        <div className="w-full max-w-2xl mx-auto">
+          <Progress value={uploadProgress} className="h-2" />
+          <p className="mt-1 text-xs text-center text-muted-foreground">
+            {uploadProgress < 100 ? `Uploading and parsing PDF... ${uploadProgress}%` : 'Upload complete. Analyzing...'}
+          </p>
+        </div>
+      )}
 
       {/* Step title */}
       <div className="text-center">
@@ -1365,7 +1395,7 @@ export function UploadPage() {
           items={items}
           setItems={setItems}
           reportSource={reportSource}
-          uploadedFile={uploadedFile}
+          uploadedFile={uploadedFile?.name ?? null}
           jurisdiction={jurisdiction}
           setJurisdiction={setJurisdiction}
           country={country}

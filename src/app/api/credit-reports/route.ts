@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
+import { PDFParse } from 'pdf-parse';
+import { writeFile } from 'fs/promises';
+import path from 'path';
 
 // GET /api/credit-reports?userId=xxx — List credit reports for a user
 export async function GET(request: NextRequest) {
@@ -26,11 +29,74 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/credit-reports — Create a credit report with report items
+// POST /api/credit-reports — Create a credit report with optional PDF upload and parsing
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { userId, reportSource, reportDate, rawText, fileName, status, items } = body;
+    const contentType = request.headers.get('content-type') || '';
+
+    let userId: string;
+    let reportSource: string;
+    let reportDate: string | null = null;
+    let items: any[] = [];
+    let fileName: string | null = null;
+    let rawText: string | null = null;
+    let filePath: string | null = null;
+    let fileSize: number | null = null;
+
+    if (contentType.includes('multipart/form-data')) {
+      const formData = await request.formData();
+
+      userId = formData.get('userId') as string;
+      reportSource = formData.get('reportSource') as string;
+      const reportDateStr = formData.get('reportDate') as string | null;
+      if (reportDateStr) reportDate = reportDateStr;
+
+      const itemsStr = formData.get('items') as string | null;
+      if (itemsStr) {
+        try {
+          items = JSON.parse(itemsStr);
+        } catch {
+          items = [];
+        }
+      }
+
+      const file = formData.get('file') as File | null;
+      if (file && file.size > 0) {
+        fileName = file.name;
+        fileSize = file.size;
+
+        // Save file to public/uploads
+        const bytes = await file.arrayBuffer();
+        const buffer = Buffer.from(bytes);
+        const uniqueName = `${Date.now()}-${fileName.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+        const uploadDir = path.join(process.cwd(), 'public', 'uploads');
+        const fullPath = path.join(uploadDir, uniqueName);
+        await writeFile(fullPath, buffer);
+        filePath = `/uploads/${uniqueName}`;
+
+        // Parse PDF if it's a PDF file
+        if (file.type === 'application/pdf' || fileName.toLowerCase().endsWith('.pdf')) {
+          try {
+            const parser = new PDFParse({ data: buffer });
+            const textResult = await parser.getText();
+            rawText = textResult.text;
+            await parser.destroy();
+          } catch (pdfError) {
+            console.error('PDF parsing error:', pdfError);
+            rawText = 'PDF parsing failed';
+          }
+        }
+      }
+    } else {
+      // JSON body (backward compatibility)
+      const body = await request.json();
+      userId = body.userId;
+      reportSource = body.reportSource;
+      reportDate = body.reportDate ?? null;
+      rawText = body.rawText ?? null;
+      fileName = body.fileName ?? null;
+      items = body.items ?? [];
+    }
 
     if (!userId || !reportSource) {
       return NextResponse.json(
@@ -44,9 +110,11 @@ export async function POST(request: NextRequest) {
         userId,
         reportSource,
         reportDate: reportDate ? new Date(reportDate) : null,
-        rawText: rawText ?? null,
-        fileName: fileName ?? null,
-        status: status ?? 'uploaded',
+        rawText,
+        fileName,
+        filePath,
+        fileSize,
+        status: filePath ? 'uploaded' : 'uploaded',
         reportItems: {
           create: (items ?? []).map(
             (item: {
@@ -81,6 +149,21 @@ export async function POST(request: NextRequest) {
       },
       include: { reportItems: true },
     });
+
+    // Auto-create a document record in the vault for the uploaded PDF
+    if (filePath && fileName) {
+      await db.document.create({
+        data: {
+          userId,
+          fileName,
+          fileType: 'pdf',
+          category: 'credit-report',
+          description: `Credit report from ${reportSource}`,
+          fileSize,
+          filePath,
+        },
+      });
+    }
 
     return NextResponse.json({ data: report }, { status: 201 });
   } catch (error) {
