@@ -729,7 +729,7 @@ function Step2Review({
         </CardContent>
       </Card>
 
-      {/* Uploaded File Info */
+      {/* Uploaded File Info */}
       {uploadedFile && (
         <Card>
           <CardContent className="flex items-center gap-3 pt-6">
@@ -749,7 +749,7 @@ function Step2Review({
         </Card>
       )}
 
-      {/* Items Table */
+      {/* Items Table */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">
