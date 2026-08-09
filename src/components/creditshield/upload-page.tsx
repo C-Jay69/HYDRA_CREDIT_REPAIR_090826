@@ -259,16 +259,19 @@ function Step1Upload({
   setItems,
   reportSource,
   setReportSource,
+  uploadedFile,
+  setUploadedFile,
   onNext,
 }: {
   items: ReportItem[];
   setItems: React.Dispatch<React.SetStateAction<ReportItem[]>>;
   reportSource: string;
   setReportSource: (v: string) => void;
+  uploadedFile: string | null;
+  setUploadedFile: (v: string | null) => void;
   onNext: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
 
   const addItem = () => {
@@ -363,7 +366,7 @@ function Step1Upload({
               <CheckCircle2 className="size-10 text-emerald-500" />
               <p className="mt-3 text-sm font-medium">{uploadedFile}</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                File selected. You can still add manual items below.
+                PDF received. Now add the accounts from your report below so they can be analyzed.
               </p>
             </>
           ) : (
@@ -585,7 +588,7 @@ function Step1Upload({
       {/* Next Button */}
       <div className="flex justify-end">
         <Button
-          disabled={!reportSource || (!hasValidItems && !uploadedFile)}
+          disabled={!reportSource || !hasValidItems}
           onClick={onNext}
         >
           Review Items
@@ -603,6 +606,8 @@ function Step1Upload({
 function Step2Review({
   items,
   setItems,
+  reportSource,
+  uploadedFile,
   jurisdiction,
   setJurisdiction,
   country,
@@ -613,6 +618,8 @@ function Step2Review({
 }: {
   items: ReportItem[];
   setItems: React.Dispatch<React.SetStateAction<ReportItem[]>>;
+  reportSource: string;
+  uploadedFile: string | null;
   jurisdiction: string;
   setJurisdiction: (v: string) => void;
   country: string;
@@ -722,7 +729,27 @@ function Step2Review({
         </CardContent>
       </Card>
 
-      {/* Items Table */}
+      {/* Uploaded File Info */
+      {uploadedFile && (
+        <Card>
+          <CardContent className="flex items-center gap-3 pt-6">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-emerald-100 dark:bg-emerald-900/30">
+              <FileText className="size-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-medium truncate">{uploadedFile}</p>
+              <p className="text-xs text-muted-foreground">
+                Source: {reportSource ? reportSource.charAt(0).toUpperCase() + reportSource.slice(1) : 'Unknown'}{' - '}{items.length} item{items.length !== 1 ? 's' : ''} entered for analysis
+              </p>
+            </div>
+            <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800 shrink-0">
+              Uploaded
+            </Badge>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Items Table */
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">
@@ -897,9 +924,23 @@ function Step2Review({
           {items.length === 0 && (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Inbox className="size-8 text-muted-foreground" />
-              <p className="mt-2 text-sm text-muted-foreground">
-                No items to review. Go back and add some report items.
+              <p className="mt-2 text-sm font-medium text-muted-foreground">
+                No report items added yet.
               </p>
+              <p className="mt-1 text-xs text-muted-foreground max-w-sm">
+                {uploadedFile
+                  ? 'Your PDF was received, but items must be entered manually for analysis. Go back to add items from your credit report.'
+                  : 'Go back and add the accounts from your credit report manually.'}
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-3"
+                onClick={onBack}
+              >
+                <Plus className="mr-1.5 size-3.5" />
+                Add Items
+              </Button>
             </div>
           )}
         </CardContent>
@@ -1162,6 +1203,7 @@ export function UploadPage() {
   // Step 1 state
   const [items, setItems] = useState<ReportItem[]>([]);
   const [reportSource, setReportSource] = useState('');
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
 
   // Step 2 state
   const [jurisdiction, setJurisdiction] = useState('');
@@ -1255,6 +1297,7 @@ export function UploadPage() {
     setStep(1);
     setItems([]);
     setReportSource('');
+    setUploadedFile(null);
     setJurisdiction('');
     setCountry('US');
     setAnalysisData(null);
@@ -1311,6 +1354,8 @@ export function UploadPage() {
           setItems={setItems}
           reportSource={reportSource}
           setReportSource={setReportSource}
+          uploadedFile={uploadedFile}
+          setUploadedFile={setUploadedFile}
           onNext={handleNext}
         />
       )}
@@ -1319,6 +1364,8 @@ export function UploadPage() {
         <Step2Review
           items={items}
           setItems={setItems}
+          reportSource={reportSource}
+          uploadedFile={uploadedFile}
           jurisdiction={jurisdiction}
           setJurisdiction={setJurisdiction}
           country={country}

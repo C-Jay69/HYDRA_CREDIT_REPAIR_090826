@@ -1,0 +1,1343 @@
+     1→'use client';
+     2→
+     3→import { useState, useCallback, useRef } from 'react';
+     4→import {
+     5→  Upload,
+     6→  FileText,
+     7→  Brain,
+     8→  ChevronRight,
+     9→  ChevronLeft,
+    10→  Plus,
+    11→  Trash2,
+    12→  Pencil,
+    13→  AlertTriangle,
+    14→  ShieldCheck,
+    15→  Flag,
+    16→  DollarSign,
+    17→  CheckCircle2,
+    18→  Loader2,
+    19→  Inbox,
+    20→  Sparkles,
+    21→  RotateCcw,
+    22→} from 'lucide-react';
+    23→import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+    24→import { Badge } from '@/components/ui/badge';
+    25→import { Button } from '@/components/ui/button';
+    26→import { Separator } from '@/components/ui/separator';
+    27→import { Skeleton } from '@/components/ui/skeleton';
+    28→import { Progress } from '@/components/ui/progress';
+    29→import { Input } from '@/components/ui/input';
+    30→import { Label } from '@/components/ui/label';
+    31→import { Textarea } from '@/components/ui/textarea';
+    32→import { Checkbox } from '@/components/ui/checkbox';
+    33→import { ScrollArea } from '@/components/ui/scroll-area';
+    34→import {
+    35→  Select,
+    36→  SelectContent,
+    37→  SelectGroup,
+    38→  SelectItem,
+    39→  SelectLabel,
+    40→  SelectTrigger,
+    41→  SelectValue,
+    42→} from '@/components/ui/select';
+    43→import {
+    44→  Table,
+    45→  TableBody,
+    46→  TableCell,
+    47→  TableHead,
+    48→  TableHeader,
+    49→  TableRow,
+    50→} from '@/components/ui/table';
+    51→import { useAppStore } from '@/store/app-store';
+    52→import { cn } from '@/lib/utils';
+    53→
+    54→// ---------------------------------------------------------------------------
+    55→// Types
+    56→// ---------------------------------------------------------------------------
+    57→
+    58→interface ReportItem {
+    59→  id: string; // local unique key
+    60→  accountName: string;
+    61→  accountNumber: string;
+    62→  creditorName: string;
+    63→  balance: string;
+    64→  originalAmount: string;
+    65→  dateOpened: string;
+    66→  dateClosed: string;
+    67→  dateDelinquent: string;
+    68→  status: string;
+    69→  accountType: string;
+    70→  isMedical: boolean;
+    71→  isAuthorizedUser: boolean;
+    72→  flaggedUnknown: boolean;
+    73→  flaggedBalance: boolean;
+    74→}
+    75→
+    76→interface AnalyzedItemResult {
+    77→  reportItemId: string;
+    78→  issues: AnalysisIssue[];
+    79→  scoreImpact: string;
+    80→}
+    81→
+    82→interface AnalysisIssue {
+    83→  category: string;
+    84→  description: string;
+    85→  recommendedAction: string;
+    86→  legalBasis: string;
+    87→  confidence: number;
+    88→  disputeType: string;
+    89→  strategy: string | null;
+    90→}
+    91→
+    92→interface AnalysisResponse {
+    93→  data: {
+    94→    analysis: {
+    95→      items: AnalyzedItemResult[];
+    96→    };
+    97→    disputesCreated: number;
+    98→    disputes: Array<{ id: string }>;
+    99→  };
+   100→}
+   101→
+   102→// ---------------------------------------------------------------------------
+   103→// Constants
+   104→// ---------------------------------------------------------------------------
+   105→
+   106→const REPORT_SOURCES = [
+   107→  { value: 'experian', label: 'Experian' },
+   108→  { value: 'equifax', label: 'Equifax' },
+   109→  { value: 'transunion', label: 'TransUnion' },
+   110→  { value: 'annualcreditreport.com', label: 'AnnualCreditReport.com' },
+   111→];
+   112→
+   113→const ACCOUNT_STATUSES = [
+   114→  { value: 'open', label: 'Open' },
+   115→  { value: 'closed', label: 'Closed' },
+   116→  { value: 'paid', label: 'Paid' },
+   117→  { value: 'charged-off', label: 'Charged-Off' },
+   118→  { value: 'in-collections', label: 'In Collections' },
+   119→  { value: 'late', label: 'Late' },
+   120→];
+   121→
+   122→const ACCOUNT_TYPES = [
+   123→  { value: 'credit-card', label: 'Credit Card' },
+   124→  { value: 'medical', label: 'Medical' },
+   125→  { value: 'auto', label: 'Auto Loan' },
+   126→  { value: 'mortgage', label: 'Mortgage' },
+   127→  { value: 'student-loan', label: 'Student Loan' },
+   128→  { value: 'other', label: 'Other' },
+   129→];
+   130→
+   131→const US_STATES = [
+   132→  'Alabama', 'Alaska', 'Arizona', 'Arkansas', 'California', 'Colorado',
+   133→  'Connecticut', 'Delaware', 'Florida', 'Georgia', 'Hawaii', 'Idaho',
+   134→  'Illinois', 'Indiana', 'Iowa', 'Kansas', 'Kentucky', 'Louisiana',
+   135→  'Maine', 'Maryland', 'Massachusetts', 'Michigan', 'Minnesota',
+   136→  'Mississippi', 'Missouri', 'Montana', 'Nebraska', 'Nevada',
+   137→  'New Hampshire', 'New Jersey', 'New Mexico', 'New York',
+   138→  'North Carolina', 'North Dakota', 'Ohio', 'Oklahoma', 'Oregon',
+   139→  'Pennsylvania', 'Rhode Island', 'South Carolina', 'South Dakota',
+   140→  'Tennessee', 'Texas', 'Utah', 'Vermont', 'Virginia', 'Washington',
+   141→  'West Virginia', 'Wisconsin', 'Wyoming', 'District of Columbia',
+   142→];
+   143→
+   144→const CANADIAN_PROVINCES = [
+   145→  'Alberta', 'British Columbia', 'Manitoba', 'New Brunswick',
+   146→  'Newfoundland and Labrador', 'Nova Scotia', 'Ontario',
+   147→  'Prince Edward Island', 'Quebec', 'Saskatchewan',
+   148→];
+   149→
+   150→const CATEGORY_COLORS: Record<string, string> = {
+   151→  outdated: 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800',
+   152→  duplicate: 'bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-800',
+   153→  'medical-debt': 'bg-pink-100 text-pink-800 border-pink-200 dark:bg-pink-900/30 dark:text-pink-300 dark:border-pink-800',
+   154→  'sold-debt': 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-800',
+   155→  'authorized-user-negative': 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-800',
+   156→  'double-negative': 'bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-800',
+   157→  'identity-theft': 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300 dark:border-red-800',
+   158→};
+   159→
+   160→function categoryLabel(cat: string): string {
+   161→  return cat
+   162→    .replace(/-/g, ' ')
+   163→    .replace(/\b\w/g, (c) => c.toUpperCase());
+   164→}
+   165→
+   166→function confidenceColor(val: number): string {
+   167→  if (val >= 75) return '[&>div]:bg-emerald-500';
+   168→  if (val >= 50) return '[&>div]:bg-amber-500';
+   169→  return '[&>div]:bg-red-500';
+   170→}
+   171→
+   172→function createEmptyItem(): ReportItem {
+   173→  return {
+   174→    id: crypto.randomUUID(),
+   175→    accountName: '',
+   176→    accountNumber: '',
+   177→    creditorName: '',
+   178→    balance: '',
+   179→    originalAmount: '',
+   180→    dateOpened: '',
+   181→    dateClosed: '',
+   182→    dateDelinquent: '',
+   183→    status: 'open',
+   184→    accountType: 'credit-card',
+   185→    isMedical: false,
+   186→    isAuthorizedUser: false,
+   187→    flaggedUnknown: false,
+   188→    flaggedBalance: false,
+   189→  };
+   190→}
+   191→
+   192→// ---------------------------------------------------------------------------
+   193→// Progress Stepper
+   194→// ---------------------------------------------------------------------------
+   195→
+   196→function ProgressStepper({ currentStep }: { currentStep: number }) {
+   197→  const steps = [
+   198→    { num: 1, label: 'Upload', icon: Upload },
+   199→    { num: 2, label: 'Review', icon: FileText },
+   200→    { num: 3, label: 'Analyze', icon: Brain },
+   201→  ];
+   202→
+   203→  return (
+   204→    <div className="flex items-center justify-center gap-2">
+   205→      {steps.map((step, i) => {
+   206→        const isActive = currentStep === step.num;
+   207→        const isCompleted = currentStep > step.num;
+   208→        const Icon = step.icon;
+   209→
+   210→        return (
+   211→          <div key={step.num} className="flex items-center gap-2">
+   212→            {i > 0 && (
+   213→              <div
+   214→                className={cn(
+   215→                  'h-0.5 w-8 md:w-16 transition-colors',
+   216→                  currentStep > step.num ? 'bg-primary' : 'bg-muted'
+   217→                )}
+   218→              />
+   219→            )}
+   220→            <div className="flex flex-col items-center gap-1">
+   221→              <div
+   222→                className={cn(
+   223→                  'flex size-10 items-center justify-center rounded-full border-2 transition-colors',
+   224→                  isActive
+   225→                    ? 'border-primary bg-primary text-primary-foreground'
+   226→                    : isCompleted
+   227→                      ? 'border-primary bg-primary/10 text-primary'
+   228→                      : 'border-muted-foreground/30 bg-muted text-muted-foreground'
+   229→                )}
+   230→              >
+   231→                {isCompleted ? (
+   232→                  <CheckCircle2 className="size-5" />
+   233→                ) : (
+   234→                  <Icon className="size-4" />
+   235→                )}
+   236→              </div>
+   237→              <span
+   238→                className={cn(
+   239→                  'hidden text-xs font-medium sm:block',
+   240→                  isActive ? 'text-primary' : 'text-muted-foreground'
+   241→                )}
+   242→              >
+   243→                {step.label}
+   244→              </span>
+   245→            </div>
+   246→          </div>
+   247→        );
+   248→      })}
+   249→    </div>
+   250→  );
+   251→}
+   252→
+   253→// ---------------------------------------------------------------------------
+   254→// Step 1: Upload
+   255→// ---------------------------------------------------------------------------
+   256→
+   257→function Step1Upload({
+   258→  items,
+   259→  setItems,
+   260→  reportSource,
+   261→  setReportSource,
+   262→  onNext,
+   263→}: {
+   264→  items: ReportItem[];
+   265→  setItems: React.Dispatch<React.SetStateAction<ReportItem[]>>;
+   266→  reportSource: string;
+   267→  setReportSource: (v: string) => void;
+   268→  onNext: () => void;
+   269→}) {
+   270→  const fileInputRef = useRef<HTMLInputElement>(null);
+   271→  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+   272→  const [dragOver, setDragOver] = useState(false);
+   273→
+   274→  const addItem = () => {
+   275→    setItems((prev) => [...prev, createEmptyItem()]);
+   276→  };
+   277→
+   278→  const removeItem = (id: string) => {
+   279→    setItems((prev) => prev.filter((item) => item.id !== id));
+   280→  };
+   281→
+   282→  const updateItem = (id: string, field: keyof ReportItem, value: string | boolean) => {
+   283→    setItems((prev) =>
+   284→      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+   285→    );
+   286→  };
+   287→
+   288→  const handleDragOver = useCallback((e: React.DragEvent) => {
+   289→    e.preventDefault();
+   290→    setDragOver(true);
+   291→  }, []);
+   292→
+   293→  const handleDragLeave = useCallback((e: React.DragEvent) => {
+   294→    e.preventDefault();
+   295→    setDragOver(false);
+   296→  }, []);
+   297→
+   298→  const handleDrop = useCallback((e: React.DragEvent) => {
+   299→    e.preventDefault();
+   300→    setDragOver(false);
+   301→    const files = e.dataTransfer.files;
+   302→    if (files.length > 0 && files[0].type === 'application/pdf') {
+   303→      setUploadedFile(files[0].name);
+   304→    }
+   305→  }, []);
+   306→
+   307→  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+   308→    const files = e.target.files;
+   309→    if (files && files.length > 0) {
+   310→      setUploadedFile(files[0].name);
+   311→    }
+   312→  };
+   313→
+   314→  const hasValidItems = items.some(
+   315→    (item) => item.accountName.trim().length > 0
+   316→  );
+   317→
+   318→  return (
+   319→    <div className="space-y-6">
+   320→      {/* Report Source */}
+   321→      <div>
+   322→        <Label className="text-sm font-medium">Report Source</Label>
+   323→        <Select value={reportSource} onValueChange={setReportSource}>
+   324→          <SelectTrigger className="mt-1.5 w-full">
+   325→            <SelectValue placeholder="Select a credit bureau or source" />
+   326→          </SelectTrigger>
+   327→          <SelectContent>
+   328→            {REPORT_SOURCES.map((src) => (
+   329→              <SelectItem key={src.value} value={src.value}>
+   330→                {src.label}
+   331→              </SelectItem>
+   332→            ))}
+   333→          </SelectContent>
+   334→        </Select>
+   335→      </div>
+   336→
+   337→      <Separator />
+   338→
+   339→      {/* Drag & Drop Zone */}
+   340→      <div>
+   341→        <Label className="text-sm font-medium">Upload Credit Report (PDF)</Label>
+   342→        <div
+   343→          onDragOver={handleDragOver}
+   344→          onDragLeave={handleDragLeave}
+   345→          onDrop={handleDrop}
+   346→          onClick={() => fileInputRef.current?.click()}
+   347→          className={cn(
+   348→            'mt-1.5 flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed p-8 transition-colors',
+   349→            dragOver
+   350→              ? 'border-primary bg-primary/5'
+   351→              : 'border-muted-foreground/25 hover:border-primary/50 hover:bg-muted/50'
+   352→          )}
+   353→        >
+   354→          <input
+   355→            ref={fileInputRef}
+   356→            type="file"
+   357→            accept=".pdf"
+   358→            className="hidden"
+   359→            onChange={handleFileSelect}
+   360→          />
+   361→          {uploadedFile ? (
+   362→            <>
+   363→              <CheckCircle2 className="size-10 text-emerald-500" />
+   364→              <p className="mt-3 text-sm font-medium">{uploadedFile}</p>
+   365→              <p className="mt-1 text-xs text-muted-foreground">
+   366→                File selected. You can still add manual items below.
+   367→              </p>
+   368→            </>
+   369→          ) : (
+   370→            <>
+   371→              <Upload className="size-10 text-muted-foreground" />
+   372→              <p className="mt-3 text-sm font-medium text-muted-foreground">
+   373→                Drop your credit report here or click to browse
+   374→              </p>
+   375→              <p className="mt-1 text-xs text-muted-foreground">
+   376→                PDF files only. Maximum 25MB.
+   377→              </p>
+   378→            </>
+   379→          )}
+   380→        </div>
+   381→      </div>
+   382→
+   383→      <Separator />
+   384→
+   385→      {/* Manual Entry */}
+   386→      <div>
+   387→        <div className="flex items-center justify-between">
+   388→          <div>
+   389→            <Label className="text-sm font-medium">Manual Entry</Label>
+   390→            <p className="text-xs text-muted-foreground">
+   391→              Enter report items from your credit report manually
+   392→            </p>
+   393→          </div>
+   394→          <Button size="sm" variant="outline" onClick={addItem}>
+   395→            <Plus className="mr-1 size-4" />
+   396→            Add Item
+   397→          </Button>
+   398→        </div>
+   399→
+   400→        {items.length === 0 ? (
+   401→          <Card className="mt-3">
+   402→            <CardContent className="flex flex-col items-center justify-center py-8 text-center">
+   403→              <Inbox className="size-8 text-muted-foreground" />
+   404→              <p className="mt-2 text-sm text-muted-foreground">
+   405→                No items added yet. Click &quot;Add Item&quot; to begin.
+   406→              </p>
+   407→            </CardContent>
+   408→          </Card>
+   409→        ) : (
+   410→          <ScrollArea className="mt-3 max-h-[500px]">
+   411→            <div className="space-y-4">
+   412→              {items.map((item, idx) => (
+   413→                <Card key={item.id}>
+   414→                  <CardHeader className="pb-3">
+   415→                    <div className="flex items-center justify-between">
+   416→                      <CardTitle className="text-sm">
+   417→                        Item #{idx + 1}
+   418→                      </CardTitle>
+   419→                      {items.length > 1 && (
+   420→                        <Button
+   421→                          variant="ghost"
+   422→                          size="sm"
+   423→                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+   424→                          onClick={() => removeItem(item.id)}
+   425→                        >
+   426→                          <Trash2 className="size-4" />
+   427→                        </Button>
+   428→                      )}
+   429→                    </div>
+   430→                  </CardHeader>
+   431→                  <CardContent className="pt-0">
+   432→                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+   433→                      {/* Account Name */}
+   434→                      <div className="space-y-1">
+   435→                        <Label className="text-xs">Account Name *</Label>
+   436→                        <Input
+   437→                          placeholder="e.g. Chase Sapphire"
+   438→                          value={item.accountName}
+   439→                          onChange={(e) => updateItem(item.id, 'accountName', e.target.value)}
+   440→                        />
+   441→                      </div>
+   442→                      {/* Account Number */}
+   443→                      <div className="space-y-1">
+   444→                        <Label className="text-xs">Account Number</Label>
+   445→                        <Input
+   446→                          placeholder="e.g. ****1234"
+   447→                          value={item.accountNumber}
+   448→                          onChange={(e) => updateItem(item.id, 'accountNumber', e.target.value)}
+   449→                        />
+   450→                      </div>
+   451→                      {/* Creditor Name */}
+   452→                      <div className="space-y-1">
+   453→                        <Label className="text-xs">Creditor Name</Label>
+   454→                        <Input
+   455→                          placeholder="e.g. JPMorgan Chase"
+   456→                          value={item.creditorName}
+   457→                          onChange={(e) => updateItem(item.id, 'creditorName', e.target.value)}
+   458→                        />
+   459→                      </div>
+   460→                      {/* Balance */}
+   461→                      <div className="space-y-1">
+   462→                        <Label className="text-xs">Current Balance ($)</Label>
+   463→                        <Input
+   464→                          type="number"
+   465→                          placeholder="0.00"
+   466→                          value={item.balance}
+   467→                          onChange={(e) => updateItem(item.id, 'balance', e.target.value)}
+   468→                        />
+   469→                      </div>
+   470→                      {/* Original Amount */}
+   471→                      <div className="space-y-1">
+   472→                        <Label className="text-xs">Original Amount ($)</Label>
+   473→                        <Input
+   474→                          type="number"
+   475→                          placeholder="0.00"
+   476→                          value={item.originalAmount}
+   477→                          onChange={(e) => updateItem(item.id, 'originalAmount', e.target.value)}
+   478→                        />
+   479→                      </div>
+   480→                      {/* Status */}
+   481→                      <div className="space-y-1">
+   482→                        <Label className="text-xs">Status</Label>
+   483→                        <Select value={item.status} onValueChange={(v) => updateItem(item.id, 'status', v)}>
+   484→                          <SelectTrigger className="w-full">
+   485→                            <SelectValue />
+   486→                          </SelectTrigger>
+   487→                          <SelectContent>
+   488→                            {ACCOUNT_STATUSES.map((s) => (
+   489→                              <SelectItem key={s.value} value={s.value}>
+   490→                                {s.label}
+   491→                              </SelectItem>
+   492→                            ))}
+   493→                          </SelectContent>
+   494→                        </Select>
+   495→                      </div>
+   496→                      {/* Account Type */}
+   497→                      <div className="space-y-1">
+   498→                        <Label className="text-xs">Account Type</Label>
+   499→                        <Select value={item.accountType} onValueChange={(v) => updateItem(item.id, 'accountType', v)}>
+   500→                          <SelectTrigger className="w-full">
+   501→                            <SelectValue />
+   502→                          </SelectTrigger>
+   503→                          <SelectContent>
+   504→                            {ACCOUNT_TYPES.map((t) => (
+   505→                              <SelectItem key={t.value} value={t.value}>
+   506→                                {t.label}
+   507→                              </SelectItem>
+   508→                            ))}
+   509→                          </SelectContent>
+   510→                        </Select>
+   511→                      </div>
+   512→                      {/* Date Opened */}
+   513→                      <div className="space-y-1">
+   514→                        <Label className="text-xs">Date Opened</Label>
+   515→                        <Input
+   516→                          type="date"
+   517→                          value={item.dateOpened}
+   518→                          onChange={(e) => updateItem(item.id, 'dateOpened', e.target.value)}
+   519→                        />
+   520→                      </div>
+   521→                      {/* Date Closed */}
+   522→                      <div className="space-y-1">
+   523→                        <Label className="text-xs">Date Closed</Label>
+   524→                        <Input
+   525→                          type="date"
+   526→                          value={item.dateClosed}
+   527→                          onChange={(e) => updateItem(item.id, 'dateClosed', e.target.value)}
+   528→                        />
+   529→                      </div>
+   530→                      {/* Date Delinquent */}
+   531→                      <div className="space-y-1">
+   532→                        <Label className="text-xs">Date Delinquent</Label>
+   533→                        <Input
+   534→                          type="date"
+   535→                          value={item.dateDelinquent}
+   536→                          onChange={(e) => updateItem(item.id, 'dateDelinquent', e.target.value)}
+   537→                        />
+   538→                      </div>
+   539→                      {/* Checkboxes */}
+   540→                      <div className="flex items-center gap-6 sm:col-span-2 lg:col-span-3">
+   541→                        <div className="flex items-center gap-2">
+   542→                          <Checkbox
+   543→                            id={`medical-${item.id}`}
+   544→                            checked={item.isMedical}
+   545→                            onCheckedChange={(v) => updateItem(item.id, 'isMedical', !!v)}
+   546→                          />
+   547→                          <Label htmlFor={`medical-${item.id}`} className="text-xs cursor-pointer">
+   548→                            Medical Debt
+   549→                          </Label>
+   550→                        </div>
+   551→                        <div className="flex items-center gap-2">
+   552→                          <Checkbox
+   553→                            id={`auth-${item.id}`}
+   554→                            checked={item.isAuthorizedUser}
+   555→                            onCheckedChange={(v) => updateItem(item.id, 'isAuthorizedUser', !!v)}
+   556→                          />
+   557→                          <Label htmlFor={`auth-${item.id}`} className="text-xs cursor-pointer">
+   558→                            Authorized User
+   559→                          </Label>
+   560→                        </div>
+   561→                      </div>
+   562→                    </div>
+   563→                  </CardContent>
+   564→                </Card>
+   565→              ))}
+   566→            </div>
+   567→          </ScrollArea>
+   568→        )}
+   569→
+   570→        {/* Add Another Item */}
+   571→        {items.length > 0 && (
+   572→          <Button
+   573→            variant="outline"
+   574→            className="mt-3 w-full border-dashed"
+   575→            onClick={addItem}
+   576→          >
+   577→            <Plus className="mr-2 size-4" />
+   578→            Add Another Item
+   579→          </Button>
+   580→        )}
+   581→      </div>
+   582→
+   583→      <Separator />
+   584→
+   585→      {/* Next Button */}
+   586→      <div className="flex justify-end">
+   587→        <Button
+   588→          disabled={!reportSource || (!hasValidItems && !uploadedFile)}
+   589→          onClick={onNext}
+   590→        >
+   591→          Review Items
+   592→          <ChevronRight className="ml-2 size-4" />
+   593→        </Button>
+   594→      </div>
+   595→    </div>
+   596→  );
+   597→}
+   598→
+   599→// ---------------------------------------------------------------------------
+   600→// Step 2: Review
+   601→// ---------------------------------------------------------------------------
+   602→
+   603→function Step2Review({
+   604→  items,
+   605→  setItems,
+   606→  jurisdiction,
+   607→  setJurisdiction,
+   608→  country,
+   609→  setCountry,
+   610→  onBack,
+   611→  onAnalyze,
+   612→  analyzing,
+   613→}: {
+   614→  items: ReportItem[];
+   615→  setItems: React.Dispatch<React.SetStateAction<ReportItem[]>>;
+   616→  jurisdiction: string;
+   617→  setJurisdiction: (v: string) => void;
+   618→  country: string;
+   619→  setCountry: (v: string) => void;
+   620→  onBack: () => void;
+   621→  onAnalyze: () => void;
+   622→  analyzing: boolean;
+   623→}) {
+   624→  const [editingId, setEditingId] = useState<string | null>(null);
+   625→  const [editItem, setEditItem] = useState<ReportItem | null>(null);
+   626→
+   627→  const removeItem = (id: string) => {
+   628→    setItems((prev) => prev.filter((item) => item.id !== id));
+   629→  };
+   630→
+   631→  const startEdit = (item: ReportItem) => {
+   632→    setEditingId(item.id);
+   633→    setEditItem({ ...item });
+   634→  };
+   635→
+   636→  const cancelEdit = () => {
+   637→    setEditingId(null);
+   638→    setEditItem(null);
+   639→  };
+   640→
+   641→  const saveEdit = () => {
+   642→    if (!editItem) return;
+   643→    setItems((prev) =>
+   644→      prev.map((item) => (item.id === editItem.id ? editItem : item))
+   645→    );
+   646→    setEditingId(null);
+   647→    setEditItem(null);
+   648→  };
+   649→
+   650→  const toggleFlag = (id: string, field: 'flaggedUnknown' | 'flaggedBalance') => {
+   651→    setItems((prev) =>
+   652→      prev.map((item) =>
+   653→        item.id === id ? { ...item, [field]: !item[field] } : item
+   654→      )
+   655→    );
+   656→  };
+   657→
+   658→  const isEditing = (id: string) => editingId === id;
+   659→
+   660→  return (
+   661→    <div className="space-y-6">
+   662→      {/* Jurisdiction selector */}
+   663→      <Card>
+   664→        <CardHeader className="pb-3">
+   665→          <CardTitle className="text-sm">Jurisdiction</CardTitle>
+   666→          <CardDescription>
+   667→            Select your state or province for accurate legal analysis
+   668→          </CardDescription>
+   669→        </CardHeader>
+   670→        <CardContent className="pt-0">
+   671→          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+   672→            <div className="space-y-1">
+   673→              <Label className="text-xs">Country</Label>
+   674→              <Select value={country} onValueChange={setCountry}>
+   675→                <SelectTrigger className="w-full">
+   676→                  <SelectValue />
+   677→                </SelectTrigger>
+   678→                <SelectContent>
+   679→                  <SelectItem value="US">United States</SelectItem>
+   680→                  <SelectItem value="CA">Canada</SelectItem>
+   681→                </SelectContent>
+   682→              </Select>
+   683→            </div>
+   684→            <div className="space-y-1">
+   685→              <Label className="text-xs">
+   686→                {country === 'CA' ? 'Province' : 'State'}
+   687→              </Label>
+   688→              <Select value={jurisdiction} onValueChange={setJurisdiction}>
+   689→                <SelectTrigger className="w-full">
+   690→                  <SelectValue
+   691→                    placeholder={
+   692→                      country === 'CA'
+   693→                        ? 'Select a province'
+   694→                        : 'Select a state'
+   695→                    }
+   696→                  />
+   697→                </SelectTrigger>
+   698→                <SelectContent>
+   699→                  {country === 'US' ? (
+   700→                    <SelectGroup>
+   701→                      <SelectLabel>U.S. States</SelectLabel>
+   702→                      {US_STATES.map((s) => (
+   703→                        <SelectItem key={s} value={s}>
+   704→                          {s}
+   705→                        </SelectItem>
+   706→                      ))}
+   707→                    </SelectGroup>
+   708→                  ) : (
+   709→                    <SelectGroup>
+   710→                      <SelectLabel>Canadian Provinces</SelectLabel>
+   711→                      {CANADIAN_PROVINCES.map((p) => (
+   712→                        <SelectItem key={p} value={p}>
+   713→                          {p}
+   714→                        </SelectItem>
+   715→                      ))}
+   716→                    </SelectGroup>
+   717→                  )}
+   718→                </SelectContent>
+   719→              </Select>
+   720→            </div>
+   721→          </div>
+   722→        </CardContent>
+   723→      </Card>
+   724→
+   725→      {/* Items Table */}
+   726→      <Card>
+   727→        <CardHeader>
+   728→          <CardTitle className="text-sm">
+   729→            Report Items ({items.length})
+   730→          </CardTitle>
+   731→          <CardDescription>
+   732→            Review your items. Flag items you don&apos;t recognize or believe have
+   733→            incorrect balances.
+   734→          </CardDescription>
+   735→        </CardHeader>
+   736→        <CardContent className="pt-0">
+   737→          <ScrollArea className="max-h-[400px]">
+   738→            <Table>
+   739→              <TableHeader>
+   740→                <TableRow>
+   741→                  <TableHead>Account</TableHead>
+   742→                  <TableHead>Status</TableHead>
+   743→                  <TableHead>Balance</TableHead>
+   744→                  <TableHead>Type</TableHead>
+   745→                  <TableHead className="text-center">Unknown?</TableHead>
+   746→                  <TableHead className="text-center">Bad Balance?</TableHead>
+   747→                  <TableHead className="w-[80px]">Actions</TableHead>
+   748→                </TableRow>
+   749→              </TableHeader>
+   750→              <TableBody>
+   751→                {items.map((item) => (
+   752→                  <TableRow key={item.id}>
+   753→                    <TableCell>
+   754→                      {isEditing(item.id) ? (
+   755→                        <Input
+   756→                          className="h-8 w-40"
+   757→                          value={editItem?.accountName ?? ''}
+   758→                          onChange={(e) =>
+   759→                            setEditItem((prev) =>
+   760→                              prev ? { ...prev, accountName: e.target.value } : null
+   761→                            )
+   762→                          }
+   763→                        />
+   764→                      ) : (
+   765→                        <div>
+   766→                          <p className="font-medium text-sm">{item.accountName || 'Unnamed'}</p>
+   767→                          <p className="text-xs text-muted-foreground">{item.creditorName}</p>
+   768→                        </div>
+   769→                      )}
+   770→                    </TableCell>
+   771→                    <TableCell>
+   772→                      {isEditing(item.id) ? (
+   773→                        <Select
+   774→                          value={editItem?.status ?? 'open'}
+   775→                          onValueChange={(v) =>
+   776→                            setEditItem((prev) =>
+   777→                              prev ? { ...prev, status: v } : null
+   778→                            )
+   779→                          }
+   780→                        >
+   781→                          <SelectTrigger className="h-8 w-28">
+   782→                            <SelectValue />
+   783→                          </SelectTrigger>
+   784→                          <SelectContent>
+   785→                            {ACCOUNT_STATUSES.map((s) => (
+   786→                              <SelectItem key={s.value} value={s.value}>
+   787→                                {s.label}
+   788→                              </SelectItem>
+   789→                            ))}
+   790→                          </SelectContent>
+   791→                        </Select>
+   792→                      ) : (
+   793→                        <Badge
+   794→                          variant="outline"
+   795→                          className="text-[11px] capitalize"
+   796→                        >
+   797→                          {item.status.replace(/-/g, ' ')}
+   798→                        </Badge>
+   799→                      )}
+   800→                    </TableCell>
+   801→                    <TableCell>
+   802→                      {isEditing(item.id) ? (
+   803→                        <Input
+   804→                          type="number"
+   805→                          className="h-8 w-24"
+   806→                          value={editItem?.balance ?? ''}
+   807→                          onChange={(e) =>
+   808→                            setEditItem((prev) =>
+   809→                              prev ? { ...prev, balance: e.target.value } : null
+   810→                            )
+   811→                          }
+   812→                        />
+   813→                      ) : (
+   814→                        <span className="text-sm">
+   815→                          {item.balance ? `$${Number(item.balance).toLocaleString()}` : '—'}
+   816→                        </span>
+   817→                      )}
+   818→                    </TableCell>
+   819→                    <TableCell className="text-sm capitalize">
+   820→                      {item.accountType.replace(/-/g, ' ')}
+   821→                    </TableCell>
+   822→                    <TableCell className="text-center">
+   823→                      <button
+   824→                        onClick={() => toggleFlag(item.id, 'flaggedUnknown')}
+   825→                        className={cn(
+   826→                          'inline-flex size-7 items-center justify-center rounded-full transition-colors',
+   827→                          item.flaggedUnknown
+   828→                            ? 'bg-red-100 text-red-600 hover:bg-red-200 dark:bg-red-900/30 dark:hover:bg-red-900/50'
+   829→                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+   830→                        )}
+   831→                        title="Flag as unknown (possible identity theft)"
+   832→                      >
+   833→                        <Flag className="size-3.5" />
+   834→                      </button>
+   835→                    </TableCell>
+   836→                    <TableCell className="text-center">
+   837→                      <button
+   838→                        onClick={() => toggleFlag(item.id, 'flaggedBalance')}
+   839→                        className={cn(
+   840→                          'inline-flex size-7 items-center justify-center rounded-full transition-colors',
+   841→                          item.flaggedBalance
+   842→                            ? 'bg-amber-100 text-amber-600 hover:bg-amber-200 dark:bg-amber-900/30 dark:hover:bg-amber-900/50'
+   843→                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+   844→                        )}
+   845→                        title="Flag as incorrect balance"
+   846→                      >
+   847→                        <DollarSign className="size-3.5" />
+   848→                      </button>
+   849→                    </TableCell>
+   850→                    <TableCell>
+   851→                      {isEditing(item.id) ? (
+   852→                        <div className="flex gap-1">
+   853→                          <Button
+   854→                            variant="ghost"
+   855→                            size="sm"
+   856→                            className="h-7 w-7 p-0 text-emerald-600 hover:text-emerald-700"
+   857→                            onClick={saveEdit}
+   858→                          >
+   859→                            <CheckCircle2 className="size-4" />
+   860→                          </Button>
+   861→                          <Button
+   862→                            variant="ghost"
+   863→                            size="sm"
+   864→                            className="h-7 w-7 p-0 text-muted-foreground"
+   865→                            onClick={cancelEdit}
+   866→                          >
+   867→                            <RotateCcw className="size-4" />
+   868→                          </Button>
+   869→                        </div>
+   870→                      ) : (
+   871→                        <div className="flex gap-1">
+   872→                          <Button
+   873→                            variant="ghost"
+   874→                            size="sm"
+   875→                            className="h-7 w-7 p-0"
+   876→                            onClick={() => startEdit(item)}
+   877→                          >
+   878→                            <Pencil className="size-3.5" />
+   879→                          </Button>
+   880→                          <Button
+   881→                            variant="ghost"
+   882→                            size="sm"
+   883→                            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+   884→                            onClick={() => removeItem(item.id)}
+   885→                          >
+   886→                            <Trash2 className="size-3.5" />
+   887→                          </Button>
+   888→                        </div>
+   889→                      )}
+   890→                    </TableCell>
+   891→                  </TableRow>
+   892→                ))}
+   893→              </TableBody>
+   894→            </Table>
+   895→          </ScrollArea>
+   896→
+   897→          {items.length === 0 && (
+   898→            <div className="flex flex-col items-center justify-center py-8 text-center">
+   899→              <Inbox className="size-8 text-muted-foreground" />
+   900→              <p className="mt-2 text-sm text-muted-foreground">
+   901→                No items to review. Go back and add some report items.
+   902→              </p>
+   903→            </div>
+   904→          )}
+   905→        </CardContent>
+   906→      </Card>
+   907→
+   908→      {/* Flag Legend */}
+   909→      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+   910→        <div className="flex items-center gap-1.5">
+   911→          <Flag className="size-3 text-red-500" />
+   912→          <span>Flagged Unknown = Possible identity theft</span>
+   913→        </div>
+   914→        <div className="flex items-center gap-1.5">
+   915→          <DollarSign className="size-3 text-amber-500" />
+   916→          <span>Flagged Balance = Believed incorrect</span>
+   917→        </div>
+   918→      </div>
+   919→
+   920→      {/* Navigation */}
+   921→      <Separator />
+   922→      <div className="flex justify-between">
+   923→        <Button variant="outline" onClick={onBack} disabled={analyzing}>
+   924→          <ChevronLeft className="mr-2 size-4" />
+   925→          Back
+   926→        </Button>
+   927→        <Button onClick={onAnalyze} disabled={items.length === 0 || analyzing}>
+   928→          {analyzing ? (
+   929→            <>
+   930→              <Loader2 className="mr-2 size-4 animate-spin" />
+   931→              Analyzing...
+   932→            </>
+   933→          ) : (
+   934→            <>
+   935→              <Brain className="mr-2 size-4" />
+   936→              Run Analysis
+   937→            </>
+   938→          )}
+   939→        </Button>
+   940→      </div>
+   941→    </div>
+   942→  );
+   943→}
+   944→
+   945→// ---------------------------------------------------------------------------
+   946→// Step 3: Analysis Results
+   947→// ---------------------------------------------------------------------------
+   948→
+   949→function Step3Results({
+   950→  items,
+   951→  analysisData,
+   952→  onBack,
+   953→  onNewReport,
+   954→}: {
+   955→  items: ReportItem[];
+   956→  analysisData: AnalysisResponse;
+   957→  onBack: () => void;
+   958→  onNewReport: () => void;
+   959→}) {
+   960→  const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+   961→  const analysisItems = analysisData.data.analysis.items;
+   962→
+   963→  // Compute summary
+   964→  const totalIssues = analysisItems.reduce((sum, a) => sum + a.issues.length, 0);
+   965→  const highConfidence = analysisItems.reduce(
+   966→    (sum, a) => sum + a.issues.filter((i) => i.confidence >= 75).length,
+   967→    0
+   968→  );
+   969→  const itemsWithIssues = analysisItems.filter((a) => a.issues.length > 0).length;
+   970→
+   971→  const getItemName = (reportItemId: string) => {
+   972→    const item = items.find((i) => i.id === reportItemId);
+   973→    return item?.accountName ?? 'Unknown Account';
+   974→  };
+   975→
+   976→  const getItemStatus = (reportItemId: string) => {
+   977→    const item = items.find((i) => i.id === reportItemId);
+   978→    return item?.status ?? 'unknown';
+   979→  };
+   980→
+   981→  return (
+   982→    <div className="space-y-6">
+   983→      {/* Summary */}
+   984→      <Card>
+   985→        <CardContent className="pt-0">
+   986→          <div className="flex flex-wrap items-center gap-6">
+   987→            <div className="flex items-center gap-3">
+   988→              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10">
+   989→                <Sparkles className="size-6 text-primary" />
+   990→              </div>
+   991→              <div>
+   992→                <p className="text-2xl font-bold">{totalIssues}</p>
+   993→                <p className="text-xs text-muted-foreground">Issues Found</p>
+   994→              </div>
+   995→            </div>
+   996→            <Separator orientation="vertical" className="h-12" />
+   997→            <div className="flex items-center gap-3">
+   998→              <div className="flex size-12 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+   999→                <ShieldCheck className="size-6 text-emerald-600 dark:text-emerald-400" />
+  1000→              </div>
+  1001→              <div>
+  1002→                <p className="text-2xl font-bold">{highConfidence}</p>
+  1003→                <p className="text-xs text-muted-foreground">High Confidence</p>
+  1004→              </div>
+  1005→            </div>
+  1006→            <Separator orientation="vertical" className="h-12" />
+  1007→            <div className="flex items-center gap-3">
+  1008→              <div className="flex size-12 items-center justify-center rounded-full bg-amber-100 dark:bg-amber-900/30">
+  1009→                <AlertTriangle className="size-6 text-amber-600 dark:text-amber-400" />
+  1010→              </div>
+  1011→              <div>
+  1012→                <p className="text-2xl font-bold">{itemsWithIssues}</p>
+  1013→                <p className="text-xs text-muted-foreground">Items Need Attention</p>
+  1014→              </div>
+  1015→            </div>
+  1016→          </div>
+  1017→          {analysisData.data.disputesCreated > 0 && (
+  1018→            <p className="mt-4 text-sm text-muted-foreground">
+  1019→              <strong className="text-foreground">
+  1020→                {analysisData.data.disputesCreated} dispute
+  1021→                {analysisData.data.disputesCreated !== 1 ? 's' : ''}
+  1022→              </strong>{' '}
+  1023→              created automatically and can be found in the Disputes page.
+  1024→            </p>
+  1025→          )}
+  1026→        </CardContent>
+  1027→      </Card>
+  1028→
+  1029→      {/* Per-item results */}
+  1030→      {analysisItems.map((analyzed) => {
+  1031→        if (analyzed.issues.length === 0) return null;
+  1032→
+  1033→        return (
+  1034→          <Card key={analyzed.reportItemId}>
+  1035→            <CardHeader>
+  1036→              <div className="flex items-center gap-2">
+  1037→                <CardTitle className="text-sm">
+  1038→                  {getItemName(analyzed.reportItemId)}
+  1039→                </CardTitle>
+  1040→                <Badge variant="outline" className="text-[11px] capitalize">
+  1041→                  {getItemStatus(analyzed.reportItemId).replace(/-/g, ' ')}
+  1042→                </Badge>
+  1043→              </div>
+  1044→              <CardDescription>
+  1045→                {analyzed.issues.length} issue{analyzed.issues.length !== 1 ? 's' : ''} detected
+  1046→              </CardDescription>
+  1047→            </CardHeader>
+  1048→            <CardContent className="pt-0 space-y-3">
+  1049→              {analyzed.issues.map((issue, issueIdx) => (
+  1050→                <div
+  1051→                  key={`${analyzed.reportItemId}-${issueIdx}`}
+  1052→                  className="rounded-lg border p-4 space-y-3"
+  1053→                >
+  1054→                  {/* Category Badge */}
+  1055→                  <div className="flex items-center gap-2">
+  1056→                    <Badge
+  1057→                      variant="outline"
+  1058→                      className={cn(
+  1059→                        'text-[11px]',
+  1060→                        CATEGORY_COLORS[issue.category] ?? 'bg-slate-100 text-slate-700 border-slate-200'
+  1061→                      )}
+  1062→                    >
+  1063→                      {categoryLabel(issue.category)}
+  1064→                    </Badge>
+  1065→                    <div className="flex items-center gap-2 ml-auto">
+  1066→                      <Progress
+  1067→                        value={issue.confidence}
+  1068→                        className={cn('h-2 w-20', confidenceColor(issue.confidence))}
+  1069→                      />
+  1070→                      <span className="text-xs font-medium text-muted-foreground">
+  1071→                        {issue.confidence}%
+  1072→                      </span>
+  1073→                    </div>
+  1074→                  </div>
+  1075→
+  1076→                  {/* Description */}
+  1077→                  <p className="text-sm">{issue.description}</p>
+  1078→
+  1079→                  {/* Recommended Action */}
+  1080→                  <div className="rounded-md bg-muted/50 p-3">
+  1081→                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+  1082→                      Recommended Action
+  1083→                    </p>
+  1084→                    <p className="text-sm">{issue.recommendedAction}</p>
+  1085→                  </div>
+  1086→
+  1087→                  {/* Legal Basis */}
+  1088→                  <div>
+  1089→                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1">
+  1090→                      Legal Basis
+  1091→                    </p>
+  1092→                    <p className="text-xs text-muted-foreground">{issue.legalBasis}</p>
+  1093→                  </div>
+  1094→
+  1095→                  {/* Create Dispute */}
+  1096→                  <Button
+  1097→                    size="sm"
+  1098→                    variant="outline"
+  1099→                    onClick={() => setCurrentPage('disputes')}
+  1100→                  >
+  1101→                    <FileText className="mr-1.5 size-3.5" />
+  1102→                    View in Disputes
+  1103→                  </Button>
+  1104→                </div>
+  1105→              ))}
+  1106→            </CardContent>
+  1107→          </Card>
+  1108→        );
+  1109→      })}
+  1110→
+  1111→      {/* Clean Report Message */}
+  1112→      {totalIssues === 0 && (
+  1113→        <Card>
+  1114→          <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+  1115→            <div className="flex size-16 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-900/30">
+  1116→              <ShieldCheck className="size-8 text-emerald-600 dark:text-emerald-400" />
+  1117→            </div>
+  1118→            <h3 className="mt-4 text-lg font-semibold">Report Looks Clean</h3>
+  1119→            <p className="mt-1 max-w-md text-sm text-muted-foreground">
+  1120→              Our AI analysis didn&apos;t find any common dispute issues on this report.
+  1121→              You can still manually create disputes from the Disputes page if you
+  1122→              believe there are errors.
+  1123→            </p>
+  1124→            <Button
+  1125→              className="mt-4"
+  1126→              onClick={() => setCurrentPage('disputes')}
+  1127→            >
+  1128→              <FileText className="mr-2 size-4" />
+  1129→              Go to Disputes
+  1130→            </Button>
+  1131→          </CardContent>
+  1132→        </Card>
+  1133→      )}
+  1134→
+  1135→      {/* Navigation */}
+  1136→      <Separator />
+  1137→      <div className="flex justify-between">
+  1138→        <Button variant="outline" onClick={onBack}>
+  1139→          <ChevronLeft className="mr-2 size-4" />
+  1140→          Back to Review
+  1141→        </Button>
+  1142→        <Button onClick={onNewReport}>
+  1143→          <Upload className="mr-2 size-4" />
+  1144→          Upload Another Report
+  1145→        </Button>
+  1146→      </div>
+  1147→    </div>
+  1148→  );
+  1149→}
+  1150→
+  1151→// ---------------------------------------------------------------------------
+  1152→// Upload Page (main export)
+  1153→// ---------------------------------------------------------------------------
+  1154→
+  1155→export function UploadPage() {
+  1156→  const userId = useAppStore((s) => s.userId);
+  1157→  const setCurrentPage = useAppStore((s) => s.setCurrentPage);
+  1158→
+  1159→  // Step state
+  1160→  const [step, setStep] = useState(1);
+  1161→
+  1162→  // Step 1 state
+  1163→  const [items, setItems] = useState<ReportItem[]>([]);
+  1164→  const [reportSource, setReportSource] = useState('');
+  1165→
+  1166→  // Step 2 state
+  1167→  const [jurisdiction, setJurisdiction] = useState('');
+  1168→  const [country, setCountry] = useState('US');
+  1169→
+  1170→  // Step 3 state
+  1171→  const [analyzing, setAnalyzing] = useState(false);
+  1172→  const [analysisError, setAnalysisError] = useState<string | null>(null);
+  1173→  const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
+  1174→
+  1175→  // Step 1 -> Step 2
+  1176→  const handleNext = () => {
+  1177→    setStep(2);
+  1178→  };
+  1179→
+  1180→  // Step 2 -> Step 1
+  1181→  const handleBackToStep1 = () => {
+  1182→    setStep(1);
+  1183→  };
+  1184→
+  1185→  // Run analysis: Step 2 -> Step 3
+  1186→  const handleAnalyze = async () => {
+  1187→    if (!userId) return;
+  1188→
+  1189→    setAnalyzing(true);
+  1190→    setAnalysisError(null);
+  1191→
+  1192→    try {
+  1193→      // 1. Create the credit report via API
+  1194→      const createRes = await fetch('/api/credit-reports', {
+  1195→        method: 'POST',
+  1196→        headers: { 'Content-Type': 'application/json' },
+  1197→        body: JSON.stringify({
+  1198→          userId,
+  1199→          reportSource,
+  1200→          status: 'uploaded',
+  1201→          items: items.map((item) => ({
+  1202→            accountName: item.accountName,
+  1203→            accountNumber: item.accountNumber || undefined,
+  1204→            creditorName: item.creditorName || undefined,
+  1205→            balance: item.balance ? parseFloat(item.balance) : undefined,
+  1206→            originalAmount: item.originalAmount ? parseFloat(item.originalAmount) : undefined,
+  1207→            dateOpened: item.dateOpened || undefined,
+  1208→            dateClosed: item.dateClosed || undefined,
+  1209→            dateDelinquent: item.dateDelinquent || undefined,
+  1210→            status: item.status,
+  1211→            accountType: item.accountType || undefined,
+  1212→            isMedical: item.isMedical,
+  1213→            isAuthorizedUser: item.isAuthorizedUser,
+  1214→          })),
+  1215→        }),
+  1216→      });
+  1217→
+  1218→      if (!createRes.ok) {
+  1219→        throw new Error('Failed to create credit report');
+  1220→      }
+  1221→
+  1222→      const createJson = await createRes.json();
+  1223→      const reportId = createJson.data.id;
+  1224→
+  1225→      // 2. Run analysis
+  1226→      const analyzeRes = await fetch('/api/analysis', {
+  1227→        method: 'POST',
+  1228→        headers: { 'Content-Type': 'application/json' },
+  1229→        body: JSON.stringify({
+  1230→          reportId,
+  1231→          userId,
+  1232→          jurisdiction,
+  1233→          country,
+  1234→        }),
+  1235→      });
+  1236→
+  1237→      if (!analyzeRes.ok) {
+  1238→        throw new Error('Failed to analyze credit report');
+  1239→      }
+  1240→
+  1241→      const analyzeJson = await analyzeRes.json();
+  1242→      setAnalysisData(analyzeJson);
+  1243→      setStep(3);
+  1244→    } catch (err) {
+  1245→      setAnalysisError(
+  1246→        err instanceof Error ? err.message : 'Analysis failed. Please try again.'
+  1247→      );
+  1248→    } finally {
+  1249→      setAnalyzing(false);
+  1250→    }
+  1251→  };
+  1252→
+  1253→  // Reset for new report
+  1254→  const handleNewReport = () => {
+  1255→    setStep(1);
+  1256→    setItems([]);
+  1257→    setReportSource('');
+  1258→    setJurisdiction('');
+  1259→    setCountry('US');
+  1260→    setAnalysisData(null);
+  1261→    setAnalysisError(null);
+  1262→  };
+  1263→
+  1264→  // Step 3 -> Step 2
+  1265→  const handleBackToStep2 = () => {
+  1266→    setStep(2);
+  1267→  };
+  1268→
+  1269→  return (
+  1270→    <div className="space-y-6">
+  1271→      {/* Progress Stepper */}
+  1272→      <div className="flex items-center justify-center py-4">
+  1273→        <ProgressStepper currentStep={step} />
+  1274→      </div>
+  1275→
+  1276→      {/* Step title */}
+  1277→      <div className="text-center">
+  1278→        <h2 className="text-xl font-bold tracking-tight">
+  1279→          {step === 1 && 'Upload Credit Report'}
+  1280→          {step === 2 && 'Review Report Items'}
+  1281→          {step === 3 && 'Analysis Results'}
+  1282→        </h2>
+  1283→        <p className="mt-1 text-sm text-muted-foreground">
+  1284→          {step === 1 && 'Add your credit report items for AI-powered analysis'}
+  1285→          {step === 2 && 'Verify your data and flag any suspicious items'}
+  1286→          {step === 3 && 'Issues found by our legal analysis engine'}
+  1287→        </p>
+  1288→      </div>
+  1289→
+  1290→      {/* Analysis Error */}
+  1291→      {analysisError && (
+  1292→        <Card className="border-red-200 dark:border-red-800">
+  1293→          <CardContent className="flex items-start gap-3 pt-0">
+  1294→            <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-500" />
+  1295→            <div>
+  1296→              <p className="text-sm font-medium text-red-800 dark:text-red-300">
+  1297→                Analysis Error
+  1298→              </p>
+  1299→              <p className="mt-0.5 text-sm text-muted-foreground">
+  1300→                {analysisError}
+  1301→              </p>
+  1302→            </div>
+  1303→          </CardContent>
+  1304→        </Card>
+  1305→      )}
+  1306→
+  1307→      {/* Step Content */}
+  1308→      {step === 1 && (
+  1309→        <Step1Upload
+  1310→          items={items}
+  1311→          setItems={setItems}
+  1312→          reportSource={reportSource}
+  1313→          setReportSource={setReportSource}
+  1314→          onNext={handleNext}
+  1315→        />
+  1316→      )}
+  1317→
+  1318→      {step === 2 && (
+  1319→        <Step2Review
+  1320→          items={items}
+  1321→          setItems={setItems}
+  1322→          jurisdiction={jurisdiction}
+  1323→          setJurisdiction={setJurisdiction}
+  1324→          country={country}
+  1325→          setCountry={setCountry}
+  1326→          onBack={handleBackToStep1}
+  1327→          onAnalyze={handleAnalyze}
+  1328→          analyzing={analyzing}
+  1329→        />
+  1330→      )}
+  1331→
+  1332→      {step === 3 && analysisData && (
+  1333→        <Step3Results
+  1334→          items={items}
+  1335→          analysisData={analysisData}
+  1336→          onBack={handleBackToStep2}
+  1337→          onNewReport={handleNewReport}
+  1338→        />
+  1339→      )}
+  1340→    </div>
+  1341→  );
+  1342→}
+  1343→
