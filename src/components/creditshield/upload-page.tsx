@@ -314,9 +314,12 @@ function Step1Upload({
     }
   };
 
-  const hasValidItems = items.some(
+const hasValidItems = items.some(
     (item) => item.accountName.trim().length > 0
   );
+
+  // Allow next if either manual items entered OR PDF uploaded
+  const canProceed = hasValidItems || !!uploadedFile;
 
   const fileName = uploadedFile?.name ?? null;
 
@@ -391,7 +394,7 @@ function Step1Upload({
       <div>
         <div className="flex items-center justify-between">
           <div>
-            <Label className="text-sm font-medium">Manual Entry</Label>
+            <Label className="text-sm font-medium">Manual Entry (Optional if PDF uploaded)</Label>
             <p className="text-xs text-muted-foreground">
               Enter report items from your credit report manually
             </p>
@@ -407,7 +410,7 @@ function Step1Upload({
             <CardContent className="flex flex-col items-center justify-center py-8 text-center">
               <Inbox className="size-8 text-muted-foreground" />
               <p className="mt-2 text-sm text-muted-foreground">
-                No items added yet. Click &quot;Add Item&quot; to begin.
+                No items added yet. Click "Add Item" to begin.
               </p>
             </CardContent>
           </Card>
@@ -590,7 +593,7 @@ function Step1Upload({
       {/* Next Button */}
       <div className="flex justify-end">
         <Button
-          disabled={!reportSource || !hasValidItems}
+          disabled={!reportSource || !canProceed}
           onClick={onNext}
         >
           Review Items
