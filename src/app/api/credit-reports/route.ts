@@ -4,6 +4,110 @@ import { PDFParse } from 'pdf-parse';
 import { writeFile } from 'fs/promises';
 import path from 'path';
 
+// Types for parsed credit report items
+interface ParsedReportItem {
+  accountName: string;
+  accountNumber?: string;
+  creditorName?: string;
+  balance?: number;
+  originalAmount?: number;
+  dateOpened?: string;
+  dateClosed?: string;
+  dateDelinquent?: string;
+  status: string;
+  accountType?: string;
+  isMedical?: boolean;
+  isAuthorizedUser?: boolean;
+}
+
+// Simple parser for credit report PDF text
+function parseCreditReportText(text: string, source: string): ParsedReportItem[] {
+  const items: ParsedReportItem[] = [];
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  // Common patterns for credit reports
+  // This is a basic parser - real implementation would need more sophisticated parsing per bureau
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Look for account-like patterns
+    // Pattern: Account name followed by numbers (account number, balances, dates)
+    const accountMatch = line.match(/^([A-Za-z][A-Za-z\s&.'-]{2,40}?)\s+(\*{0,4}\d{4}|\d{4,})\s+(.+)$/);
+    if (accountMatch) {
+      const [, accountName, accountNumber, rest] = accountMatch;
+
+      // Try to extract balance, status, dates from rest
+      const balanceMatch = rest.match(/\$?([\d,]+\.?\d*)/);
+      const statusMatch = rest.match(/\b(open|closed|paid|charged.?off|collection|late|current)\b/i);
+
+      items.push({
+        accountName: accountName.trim(),
+        accountNumber: accountNumber.trim(),
+        creditorName: '',
+        balance: balanceMatch ? parseFloat(balanceMatch[1].replace(/,/g, '')) : undefined,
+        status: statusMatch ? statusMatch[1].toLowerCase().replace(' ', '-') : 'open',
+        accountType: undefined,
+        isMedical: false,
+        isAuthorizedUser: false,
+      });
+      continue;
+    }
+
+    // Pattern: Bureau-specific formats
+    // Equifax often has: "ACCOUNT NAME  ACCOUNT #  BALANCE  STATUS  DATE OPENED"
+    if (source === 'equifax' || source === 'experian' || source === 'transunion') {
+      // Try tab-separated or multi-space separated
+      const parts = line.split(/\s{2,}|\t/).filter(p => p.length > 0);
+      if (parts.length >= 4) {
+        // Heuristic: first part is name, second might be account number, look for $ amounts
+        const name = parts[0];
+        const hasDollar = parts.some(p => p.includes('$') || /^\d+\.?\d*$/.test(p));
+        if (hasDollar && name.length > 3 && name.length < 50) {
+          let balance: number | undefined;
+          let accountNumber = '';
+          let status = 'open';
+
+          for (const part of parts) {
+            const dollarMatch = part.match(/\$?([\d,]+\.\d{2})/);
+            if (dollarMatch && !balance) {
+              balance = parseFloat(dollarMatch[1].replace(/,/g, ''));
+            }
+            const acctMatch = part.match(/(\*{0,4}\d{4}|\d{6,})/);
+            if (acctMatch && !accountNumber) {
+              accountNumber = acctMatch[1];
+            }
+            const statusMatch = part.match(/^(open|closed|paid|charged.?off|collection|late|current)$/i);
+            if (statusMatch) {
+              status = statusMatch[1].toLowerCase().replace(' ', '-');
+            }
+          }
+
+          if (balance !== undefined || accountNumber) {
+            items.push({
+              accountName: name,
+              accountNumber: accountNumber || undefined,
+              creditorName: '',
+              balance,
+              status,
+              isMedical: false,
+              isAuthorizedUser: false,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // Deduplicate by account name
+  const seen = new Set<string>();
+  return items.filter(item => {
+    const key = item.accountName.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, 50); // Limit to 50 items
+}
+
 // GET /api/credit-reports?userId=xxx — List credit reports for a user
 export async function GET(request: NextRequest) {
   try {
@@ -42,6 +146,7 @@ export async function POST(request: NextRequest) {
     let rawText: string | null = null;
     let filePath: string | null = null;
     let fileSize: number | null = null;
+    let parsedItems: ParsedReportItem[] = [];
 
     if (contentType.includes('multipart/form-data')) {
       const formData = await request.formData();
@@ -81,6 +186,9 @@ export async function POST(request: NextRequest) {
             const textResult = await parser.getText();
             rawText = textResult.text;
             await parser.destroy();
+
+            // Parse the extracted text into structured items
+            parsedItems = parseCreditReportText(rawText, reportSource);
           } catch (pdfError) {
             console.error('PDF parsing error:', pdfError);
             rawText = 'PDF parsing failed';
@@ -105,6 +213,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Combine manual items with parsed items (manual takes priority)
+    const allItems = [...items, ...parsedItems.filter(p => 
+      !items.some(m => m.accountName?.toLowerCase() === p.accountName.toLowerCase())
+    )];
+
     const report = await db.creditReport.create({
       data: {
         userId,
@@ -116,7 +229,7 @@ export async function POST(request: NextRequest) {
         fileSize,
         status: filePath ? 'uploaded' : 'uploaded',
         reportItems: {
-          create: (items ?? []).map(
+          create: (allItems ?? []).map(
             (item: {
               accountName: string;
               accountNumber?: string;
@@ -165,7 +278,15 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    return NextResponse.json({ data: report }, { status: 201 });
+    // Return parsed items so frontend can populate the form
+    return NextResponse.json({ 
+      data: report, 
+      parsedItems: parsedItems.map(p => ({
+        ...p,
+        balance: p.balance ?? '',
+        originalAmount: p.originalAmount ?? '',
+      }))
+    }, { status: 201 });
   } catch (error) {
     console.error('[POST /api/credit-reports]', error);
     return NextResponse.json({ error: 'Failed to create credit report' }, { status: 500 });

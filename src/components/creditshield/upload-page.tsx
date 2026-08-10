@@ -1221,9 +1221,74 @@ export function UploadPage() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisData, setAnalysisData] = useState<AnalysisResponse | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  const [reportId, setReportId] = useState<string | null>(null);
 
   // Step 1 -> Step 2
-  const handleNext = () => {
+  const handleNext = async () => {
+    // If PDF uploaded, parse it first and populate items
+    if (uploadedFile && userId) {
+      setUploadProgress(0);
+
+      try {
+        const formData = new FormData();
+        formData.append('userId', userId);
+        formData.append('reportSource', reportSource);
+        formData.append('status', 'uploaded');
+        formData.append('items', JSON.stringify([]));
+        formData.append('file', uploadedFile);
+
+        const progressInterval = setInterval(() => {
+          setUploadProgress((prev) => {
+            if (prev === null || prev >= 90) return prev ?? 90;
+            return prev + 10;
+          });
+        }, 100);
+
+        const createRes = await fetch('/api/credit-reports', {
+          method: 'POST',
+          body: formData,
+        });
+
+        clearInterval(progressInterval);
+
+        if (!createRes.ok) {
+          throw new Error('Failed to upload and parse credit report');
+        }
+
+        const createJson = await createRes.json();
+        setReportId(createJson.data.id);
+        const parsedItems = createJson.parsedItems || [];
+
+        if (parsedItems.length > 0) {
+          // Convert parsed items to ReportItem format
+          const newItems = parsedItems.map((p: any, idx: number) => ({
+            id: crypto.randomUUID(),
+            accountName: p.accountName || `Account ${idx + 1}`,
+            accountNumber: p.accountNumber || '',
+            creditorName: p.creditorName || '',
+            balance: p.balance?.toString() || '',
+            originalAmount: p.originalAmount?.toString() || '',
+            dateOpened: p.dateOpened || '',
+            dateClosed: p.dateClosed || '',
+            dateDelinquent: p.dateDelinquent || '',
+            status: p.status || 'open',
+            accountType: p.accountType || 'credit-card',
+            isMedical: p.isMedical || false,
+            isAuthorizedUser: p.isAuthorizedUser || false,
+            flaggedUnknown: false,
+            flaggedBalance: false,
+          }));
+          setItems(newItems);
+        }
+
+        setUploadProgress(100);
+        setTimeout(() => setUploadProgress(null), 1000);
+      } catch (err) {
+        setAnalysisError(err instanceof Error ? err.message : 'Failed to parse PDF');
+        setUploadProgress(null);
+        // Continue anyway - user can manually enter
+      }
+    }
     setStep(2);
   };
 
@@ -1238,62 +1303,55 @@ export function UploadPage() {
 
     setAnalyzing(true);
     setAnalysisError(null);
-    setUploadProgress(0);
 
     try {
-      // 1. Create the credit report via API with file upload
-      const formData = new FormData();
-      formData.append('userId', userId);
-      formData.append('reportSource', reportSource);
-      formData.append('status', 'uploaded');
-      formData.append('items', JSON.stringify(items.map((item) => ({
-        accountName: item.accountName,
-        accountNumber: item.accountNumber || undefined,
-        creditorName: item.creditorName || undefined,
-        balance: item.balance ? parseFloat(item.balance) : undefined,
-        originalAmount: item.originalAmount ? parseFloat(item.originalAmount) : undefined,
-        dateOpened: item.dateOpened || undefined,
-        dateClosed: item.dateClosed || undefined,
-        dateDelinquent: item.dateDelinquent || undefined,
-        status: item.status,
-        accountType: item.accountType || undefined,
-        isMedical: item.isMedical,
-        isAuthorizedUser: item.isAuthorizedUser,
-      }))));
+      let currentReportId = reportId;
 
-      if (uploadedFile) {
-        formData.append('file', uploadedFile);
-      }
+      // If no reportId yet (no PDF was uploaded in Step 1), create report now
+      if (!currentReportId) {
+        const formData = new FormData();
+        formData.append('userId', userId);
+        formData.append('reportSource', reportSource);
+        formData.append('status', 'uploaded');
+        formData.append('items', JSON.stringify(items.map((item) => ({
+          accountName: item.accountName,
+          accountNumber: item.accountNumber || undefined,
+          creditorName: item.creditorName || undefined,
+          balance: item.balance ? parseFloat(item.balance) : undefined,
+          originalAmount: item.originalAmount ? parseFloat(item.originalAmount) : undefined,
+          dateOpened: item.dateOpened || undefined,
+          dateClosed: item.dateClosed || undefined,
+          dateDelinquent: item.dateDelinquent || undefined,
+          status: item.status,
+          accountType: item.accountType || undefined,
+          isMedical: item.isMedical,
+          isAuthorizedUser: item.isAuthorizedUser,
+        }))));
 
-      // Simulate upload progress
-      const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => {
-          if (prev === null || prev >= 90) return prev ?? 90;
-          return prev + 10;
+        if (uploadedFile) {
+          formData.append('file', uploadedFile);
+        }
+
+        const createRes = await fetch('/api/credit-reports', {
+          method: 'POST',
+          body: formData,
         });
-      }, 100);
 
-      const createRes = await fetch('/api/credit-reports', {
-        method: 'POST',
-        body: formData,
-      });
+        if (!createRes.ok) {
+          throw new Error('Failed to create credit report');
+        }
 
-      clearInterval(progressInterval);
-      setUploadProgress(100);
-
-      if (!createRes.ok) {
-        throw new Error('Failed to create credit report');
+        const createJson = await createRes.json();
+        currentReportId = createJson.data.id;
+        setReportId(currentReportId);
       }
 
-      const createJson = await createRes.json();
-      const reportId = createJson.data.id;
-
-      // 2. Run analysis
+      // 2. Run analysis on the report
       const analyzeRes = await fetch('/api/analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reportId,
+          reportId: currentReportId,
           userId,
           jurisdiction,
           country,
@@ -1313,7 +1371,6 @@ export function UploadPage() {
       );
     } finally {
       setAnalyzing(false);
-      setUploadProgress(null);
     }
   };
 
@@ -1327,6 +1384,7 @@ export function UploadPage() {
     setCountry('US');
     setAnalysisData(null);
     setAnalysisError(null);
+    setReportId(null);
   };
 
   // Step 3 -> Step 2
